@@ -45,3 +45,58 @@ Everything runs on the device with MediaPipe Face Landmarker (bundled in `lib/` 
 All visual changes fade over a second or more. Nothing flashes, which keeps the page within the three-flashes-per-second safety limit.
 
 This is a prototype, not a medical or wellness device.
+
+## Native iPhone app (ios/)
+
+A SwiftUI version of Nmind that tracks your face with ARKit on the Face ID (TrueDepth) camera. It has the same calm reading, the same tense versus mellow verdict and the same seven-family void as the web prototype. It is a prototype and is not on the App Store.
+
+**What the native app gains**
+
+- Tracking in the dark. The Face ID camera projects its own infrared dots, so face, eye and expression tracking keep working with the lights off.
+- Steadier eye direction from ARKit's eye transforms and look-at point.
+- More precise expression scores: all 52 of ARKit's face scores (blinks, squint, wide eyes, brow, jaw, mouth) from a depth map instead of a flat picture.
+- Breathing from head motion measured in millimetres.
+
+**What it still can't do**
+
+- Pupil size. iOS does not give apps the raw infrared image, only the finished face model, so pupils can't be measured here either.
+- The pulse still comes from skin colour on the front colour camera. It is a hint and needs light on your face.
+
+Everything runs on the phone. No frames, images or numbers are saved or sent.
+
+### Install on your iPhone from a Mac (free Apple ID)
+
+You need: a Mac on macOS Sequoia 15.6 or newer (an M1 MacBook is fine), Xcode 26 or newer from the Mac App Store, a USB-C cable, and your Apple ID. A free Apple ID is enough. Apps installed this way stop opening after 7 days; plug in and press Run again to renew.
+
+1. Install Xcode from the Mac App Store. Open it once, accept the terms, and let it install the iOS components when it asks.
+2. In Xcode, open Xcode menu > Settings > Accounts, click +, choose Apple Account, and sign in.
+3. Open Terminal and paste:
+
+   ```
+   cd ~/Documents
+   git clone https://github.com/seth-merica/nmind-lab.git
+   open nmind-lab/ios/Nmind.xcodeproj
+   ```
+
+   If the Mac offers to install command line developer tools, click Install, then paste the lines again.
+4. In Xcode's left sidebar, click the blue Nmind project icon. Under Targets, click Nmind, then the Signing & Capabilities tab. Tick Automatically manage signing and set Team to your name (Personal Team).
+   If Xcode shows a red error about the bundle identifier, change Bundle Identifier to something unique, for example `lab.nmind.seth`.
+5. Plug the iPhone into the Mac. Unlock it, tap Trust, and enter your passcode.
+6. Turn on Developer Mode on the iPhone: Settings > Privacy & Security > Developer Mode (near the bottom) > switch it on > Restart. After the restart, tap Turn On and enter your passcode.
+7. In Xcode's top bar, open the device menu next to Nmind and pick your iPhone. Press the Run button (the triangle) or Command-R. The first time, Xcode spends a few minutes preparing the phone. If the Mac asks for your login password for the keychain, enter it and click Always Allow.
+8. The first launch is blocked as an untrusted developer. On the iPhone: Settings > General > VPN & Device Management > under Developer App, tap your Apple ID > Trust > Trust.
+9. Open Nmind on the iPhone and allow the camera.
+
+To get updates later, paste in Terminal:
+
+```
+cd ~/Documents/nmind-lab && git pull
+```
+
+then press Run in Xcode again.
+
+The paid Apple Developer Program ($99 a year) removes the 7-day limit and allows TestFlight installs without a cable. It isn't needed to try the prototype.
+
+### Build check
+
+`.github/workflows/ios-build.yml` compiles the app unsigned on a GitHub Mac runner on every change to `ios/`. It uses no signing and no Apple account.
