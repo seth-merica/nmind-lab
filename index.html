@@ -12,9 +12,9 @@
 <meta name="theme-color" content="#090A22">
 <link rel="manifest" href="manifest.webmanifest">
 <script>
-window.__nmErr=function(stage,e){try{var d=document.getElementById('diag');if(!d)return;d.textContent='Details: '+stage+' · '+((e&&e.name)||'Error')+((e&&e.message)?' · '+String(e.message).slice(0,140):'')+' · v4';d.hidden=false;}catch(x){}};
-window.addEventListener('error',function(ev){if(document.getElementById('intro')&&!document.getElementById('intro').hidden)window.__nmErr('page',ev.error||{name:'ScriptError',message:ev.message||(ev.target&&ev.target.src)||''});},true);
-window.addEventListener('unhandledrejection',function(ev){if(document.getElementById('intro')&&!document.getElementById('intro').hidden)window.__nmErr('page',ev.reason);});
+window.__nmErr=function(stage,e){try{var d=document.getElementById('nm-diag');if(!d)return;d.textContent='Details: '+stage+' · '+((e&&e.name)||'Error')+((e&&e.message)?' · '+String(e.message).slice(0,140):'')+' · v5';d.hidden=false;}catch(x){}};
+window.addEventListener('error',function(ev){if(document.getElementById('nm-intro')&&!document.getElementById('nm-intro').hidden)window.__nmErr('page',ev.error||{name:'ScriptError',message:ev.message||(ev.target&&ev.target.src)||''});},true);
+window.addEventListener('unhandledrejection',function(ev){if(document.getElementById('nm-intro')&&!document.getElementById('nm-intro').hidden)window.__nmErr('page',ev.reason);});
 </script>
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
@@ -39,7 +39,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:10px}
 .label{font-family:var(--f-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mist)}
 
-#k{position:fixed;inset:0;width:100%;height:100%;display:block}
+#nm-k{position:fixed;inset:0;width:100%;height:100%;display:block}
 .shade{position:fixed;inset:0;pointer-events:none;background:radial-gradient(70% 55% at 50% 40%,transparent 40%,rgba(9,10,34,.8) 100%)}
 
 .top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;pointer-events:none;
@@ -76,24 +76,24 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 .btn[aria-pressed="true"]{box-shadow:inset 0 0 0 1px var(--signal);color:var(--signal)}
 .btn:disabled{opacity:.5}
 
-#toast{position:fixed;z-index:7;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 250px);transform:translateX(-50%);padding:8px 14px;border-radius:999px;background:var(--glass);border:1px solid rgba(var(--signal-rgb),.4);color:var(--signal);font-size:13px;white-space:nowrap;opacity:0;transition:opacity .4s;pointer-events:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-#toast.show{opacity:1}
+#nm-toast{position:fixed;z-index:7;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 250px);transform:translateX(-50%);padding:8px 14px;border-radius:999px;background:var(--glass);border:1px solid rgba(var(--signal-rgb),.4);color:var(--signal);font-size:13px;white-space:nowrap;opacity:0;transition:opacity .4s;pointer-events:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+#nm-toast.show{opacity:1}
 
-#thumb{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 56px);width:96px;height:128px;border-radius:14px;overflow:hidden;border:1px solid var(--current);background:#000;opacity:0;pointer-events:none;transition:opacity .3s}
-#thumb.show{opacity:1}
-#dbg{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 192px);width:96px;padding:6px;border-radius:12px;border:1px solid var(--current);background:var(--glass);opacity:0;pointer-events:none;transition:opacity .3s;font-family:var(--f-data);font-size:10px;line-height:1.35;color:var(--mist)}
-#dbg.show{opacity:1}
-#dbg .box{position:relative;height:54px;border-radius:8px;background:rgba(9,10,34,.7);border:1px solid var(--current);margin-bottom:4px;overflow:hidden}
-#dbg .box::before,#dbg .box::after{content:"";position:absolute;background:rgba(169,165,210,.25)}
-#dbg .box::before{left:50%;top:0;bottom:0;width:1px}
-#dbg .box::after{top:50%;left:0;right:0;height:1px}
-#dbg i{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--signal);box-shadow:0 0 8px rgba(var(--signal-rgb),.9)}
+#nm-thumb{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 56px);width:96px;height:128px;border-radius:14px;overflow:hidden;border:1px solid var(--current);background:#000;opacity:0;pointer-events:none;transition:opacity .3s}
+#nm-thumb.show{opacity:1}
+#nm-dbg{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 192px);width:96px;padding:6px;border-radius:12px;border:1px solid var(--current);background:var(--glass);opacity:0;pointer-events:none;transition:opacity .3s;font-family:var(--f-data);font-size:10px;line-height:1.35;color:var(--mist)}
+#nm-dbg.show{opacity:1}
+#nm-dbg .box{position:relative;height:54px;border-radius:8px;background:rgba(9,10,34,.7);border:1px solid var(--current);margin-bottom:4px;overflow:hidden}
+#nm-dbg .box::before,#nm-dbg .box::after{content:"";position:absolute;background:rgba(169,165,210,.25)}
+#nm-dbg .box::before{left:50%;top:0;bottom:0;width:1px}
+#nm-dbg .box::after{top:50%;left:0;right:0;height:1px}
+#nm-dbg i{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--signal);box-shadow:0 0 8px rgba(var(--signal-rgb),.9)}
 .tag{font-family:var(--f-data);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mist);border:1px solid var(--current);border-radius:6px;padding:2px 5px;margin-left:2px}
-#thumb video,#thumb canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#nm-thumb video,#nm-thumb canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 
-#gaze{position:fixed;z-index:4;left:50%;top:40%;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;border:2px solid rgba(var(--signal-rgb),var(--ring,.5));box-shadow:0 0 18px rgba(var(--signal-rgb),calc(var(--ring,.5)*.7));pointer-events:none;opacity:0;transition:opacity .5s;will-change:transform,left,top}
-#gaze::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--signal);opacity:var(--core,0);box-shadow:0 0 10px rgba(var(--signal-rgb),.9)}
-#gaze.show{opacity:1}
+#nm-gaze{position:fixed;z-index:4;left:50%;top:40%;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;border:2px solid rgba(var(--signal-rgb),var(--ring,.5));box-shadow:0 0 18px rgba(var(--signal-rgb),calc(var(--ring,.5)*.7));pointer-events:none;opacity:0;transition:opacity .5s;will-change:transform,left,top}
+#nm-gaze::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--signal);opacity:var(--core,0);box-shadow:0 0 10px rgba(var(--signal-rgb),.9)}
+#nm-gaze.show{opacity:1}
 
 .overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(9,10,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   padding:calc(env(safe-area-inset-top,0px) + 20px) max(20px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 20px) max(20px,env(safe-area-inset-left,0px));overflow:auto}
@@ -107,18 +107,18 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 .err{color:var(--alert)}
 .diag{margin-top:8px;font-family:var(--f-data);font-size:10px;line-height:1.4;color:var(--mist);opacity:.85;word-break:break-word}
 
-#calib{position:fixed;inset:0;z-index:9;background:var(--abyss)}
-#calib[hidden]{display:none}
-#calib .hint{position:absolute;left:0;right:0;top:calc(50% + 52px);text-align:center;color:var(--mist);font-size:14px;padding:0 28px;display:grid;gap:4px}
-#calib .hint b{font-family:var(--f-data);font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
-#cdot{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid var(--signal);background:rgba(var(--signal-rgb),.18);box-shadow:0 0 22px rgba(var(--signal-rgb),.85);transition:left .8s cubic-bezier(.6,0,.2,1),top .8s cubic-bezier(.6,0,.2,1),transform .4s}
-#cdot::after{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--signal)}
-#cdot.hold{transform:scale(.55)}
-@media (prefers-reduced-motion: reduce){#cdot{transition:none}}
+#nm-calib{position:fixed;inset:0;z-index:9;background:var(--abyss)}
+#nm-calib[hidden]{display:none}
+#nm-calib .hint{position:absolute;left:0;right:0;top:calc(50% + 52px);text-align:center;color:var(--mist);font-size:14px;padding:0 28px;display:grid;gap:4px}
+#nm-calib .hint b{font-family:var(--f-data);font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+#nm-cdot{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid var(--signal);background:rgba(var(--signal-rgb),.18);box-shadow:0 0 22px rgba(var(--signal-rgb),.85);transition:left .8s cubic-bezier(.6,0,.2,1),top .8s cubic-bezier(.6,0,.2,1),transform .4s}
+#nm-cdot::after{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--signal)}
+#nm-cdot.hold{transform:scale(.55)}
+@media (prefers-reduced-motion: reduce){#nm-cdot{transition:none}}
 </style>
 </head>
 <body>
-<canvas id="k" aria-label="Geometry. Tap where you are looking to fine-tune the ring."></canvas>
+<canvas id="nm-k" aria-label="Geometry. Tap where you are looking to fine-tune the ring."></canvas>
 <div class="shade"></div>
 
 <header class="top">
@@ -126,36 +126,36 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
     <svg viewBox="0 0 26 26" aria-hidden="true"><g fill="none" stroke="var(--signal)" stroke-width="1.3"><ellipse cx="13" cy="13" rx="11" ry="4.3"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(45 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(90 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(135 13 13)"/></g><circle cx="13" cy="13" r="2.4" fill="var(--alert)"/></svg>
     <span>n<b>mind</b></span><span class="tag">prototype</span>
   </div>
-  <span class="pill" id="state"><span class="dot"></span><span id="state-t">Camera off</span></span>
+  <span class="pill" id="nm-state"><span class="dot"></span><span id="nm-state-t">Camera off</span></span>
 </header>
 
-<div id="thumb"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
-<div id="dbg" aria-hidden="true"><div class="box"><i id="dbg-dot"></i></div><span id="dbg-t" style="white-space:pre">eyes</span></div>
-<div id="gaze" aria-hidden="true"></div>
-<div id="toast" role="status"></div>
+<div id="nm-thumb"><video id="nm-v" playsinline muted autoplay></video><canvas id="nm-ov"></canvas></div>
+<div id="nm-dbg" aria-hidden="true"><div class="box"><i id="nm-dbg-dot"></i></div><span id="nm-dbg-t" style="white-space:pre">eyes</span></div>
+<div id="nm-gaze" aria-hidden="true"></div>
+<div id="nm-toast" role="status"></div>
 
 <div class="dock">
   <div class="panel">
-    <div class="cap" id="cap">
-      <span class="kicker" id="cap-k">Focus</span>
-      <p id="cap-p">Breathe slowly. Rest your eyes on the center.</p>
+    <div class="cap" id="nm-cap">
+      <span class="kicker" id="nm-cap-k">Focus</span>
+      <p id="nm-cap-p">Breathe slowly. Rest your eyes on the center.</p>
     </div>
-    <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+    <div class="bar" aria-hidden="true"><i id="nm-bar"></i></div>
     <div class="tele" aria-label="Live camera signals">
-      <div><b id="t-focus">0%</b><span>focus</span></div>
-      <div><b id="t-blink">0</b><span>blinks/min</span></div>
-      <div><b id="t-face">0</b><span>faces</span></div>
-      <div><b id="t-fps">0</b><span>frames/sec</span></div>
+      <div><b id="nm-t-focus">0%</b><span>focus</span></div>
+      <div><b id="nm-t-blink">0</b><span>blinks/min</span></div>
+      <div><b id="nm-t-face">0</b><span>faces</span></div>
+      <div><b id="nm-t-fps">0</b><span>frames/sec</span></div>
     </div>
     <div class="row">
-      <button class="btn" id="b-cal">Calibrate</button>
-      <button class="btn" id="b-cam" aria-pressed="false">Camera view</button>
-      <button class="btn" id="b-third">Re-center</button>
+      <button class="btn" id="nm-b-cal">Calibrate</button>
+      <button class="btn" id="nm-b-cam" aria-pressed="false">Camera view</button>
+      <button class="btn" id="nm-b-third">Re-center</button>
     </div>
   </div>
 </div>
 
-<div class="overlay" id="intro">
+<div class="overlay" id="nm-intro">
   <div class="card">
     <span class="label">Prototype · focus training</span>
     <h1>Train calm focus</h1>
@@ -165,15 +165,15 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
       <li>Rest your eyes on the center target and breathe slowly.</li>
       <li>Look away or let a second face in and it pauses.</li>
     </ul>
-    <button class="btn primary" id="b-start">Start camera</button>
-    <p class="small" id="msg">Everything runs on this phone. No video or images are saved or sent anywhere, and nothing is tracked.</p>
-    <p class="diag" id="diag" hidden></p>
+    <button class="btn primary" id="nm-b-start">Start camera</button>
+    <p class="small" id="nm-msg">Everything runs on this phone. No video or images are saved or sent anywhere, and nothing is tracked.</p>
+    <p class="diag" id="nm-diag" hidden></p>
   </div>
 </div>
 
-<div id="calib" hidden>
-  <div id="cdot" style="left:50%;top:50%"></div>
-  <div class="hint"><b id="cstep">Get ready</b><span id="chint">Hold the phone at reading distance. Keep your head still and move only your eyes.</span></div>
+<div id="nm-calib" hidden>
+  <div id="nm-cdot" style="left:50%;top:50%"></div>
+  <div class="hint"><b id="nm-cstep">Get ready</b><span id="nm-chint">Hold the phone at reading distance. Keep your head still and move only your eyes.</span></div>
 </div>
 
 <script type="module">
@@ -204,7 +204,7 @@ const FOLDS=[5,7,8,9,10,11,12];
 const PAL={signal:[47,227,200],alert:[226,96,31],mist:[169,165,210],violet:[122,92,230]};
 const mix=(a,b,t)=>a.map((v,i)=>Math.round(v+(b[i]-v)*t));
 const rgba=(c,a)=>`rgba(${c[0]},${c[1]},${c[2]},${Math.max(0,a).toFixed(3)})`;
-const canvas=$('#k'),ctx=canvas.getContext('2d');
+const canvas=$('#nm-k'),ctx=canvas.getContext('2d');
 const K={t:0,w:1,h:1,
   cur:{fidx:2,alpha:.5,tempo:.3,sat:.2,alert:0,scale:1,glyph:0},
   tgt:{fidx:2,alpha:.5,tempo:.3,sat:.2,alert:0,scale:1,glyph:0}};
@@ -315,31 +315,31 @@ const STATES={
 let mode='idle';
 function label(){
   const s=STATES[mode];
-  $('#state-t').textContent=mode==='reading'?(view==='focus'?'Focusing':'Communicating'):s.t;
-  $('#state').dataset.tone=s.tone;
+  $('#nm-state-t').textContent=mode==='reading'?(view==='focus'?'Focusing':'Communicating'):s.t;
+  $('#nm-state').dataset.tone=s.tone;
 }
 function setMode(m){
   if(m===mode)return;mode=m;
   Object.assign(K.tgt,STATES[m].k);label();
-  $('#cap').classList.toggle('dim',m!=='reading');
+  $('#nm-cap').classList.toggle('dim',m!=='reading');
 }
 function setView(v){
   view=v;
-  $('#b-third').textContent=v==='focus'?'Re-center':'Next';
-  if(v==='read'){const c=CONCEPTS[ci];$('#cap-k').textContent=c.k;$('#cap-p').textContent=c.p;K.tgt.fidx=FOLDS.indexOf(c.folds);}
-  else{$('#cap-k').textContent='Focus';$('#cap-p').textContent=calib?COACH[coachTier]:COACH0;}
+  $('#nm-b-third').textContent=v==='focus'?'Re-center':'Next';
+  if(v==='read'){const c=CONCEPTS[ci];$('#nm-cap-k').textContent=c.k;$('#nm-cap-p').textContent=c.p;K.tgt.fidx=FOLDS.indexOf(c.folds);}
+  else{$('#nm-cap-k').textContent='Focus';$('#nm-cap-p').textContent=calib?COACH[coachTier]:COACH0;}
   label();
 }
 
 /* ---------- camera + face model ---------- */
-const video=$('#v'),ov=$('#ov'),octx=ov.getContext('2d');
+const video=$('#nm-v'),ov=$('#nm-ov'),octx=ov.getContext('2d');
 let landmarker=null,stream=null,running=false,lastVT=-1;
 const standalone=!!(navigator.standalone||(typeof matchMedia==='function'&&matchMedia('(display-mode: standalone)').matches));
 const iosV=((navigator.userAgent||'').match(/OS (\d+)[_.](\d+)/)||[]).slice(1,3).join('.');
 let delegateUsed='',camInfo='';
 function diag(stage,e){
-  const d=$('#diag');
-  d.textContent='Details: '+stage+' · '+(e&&e.name||'Error')+(e&&e.message?' · '+String(e.message).slice(0,140):'')+' · '+(standalone?'home-screen app':'browser')+(iosV?' · iOS '+iosV:'')+' · v4';
+  const d=$('#nm-diag');
+  d.textContent='Details: '+stage+' · '+(e&&e.name||'Error')+(e&&e.message?' · '+String(e.message).slice(0,140):'')+' · '+(standalone?'home-screen app':'browser')+(iosV?' · iOS '+iosV:'')+' · v5';
   d.hidden=false;
 }
 async function loadModel(){
@@ -376,7 +376,7 @@ function waitVideo(ms){
   });
 }
 async function start(){
-  const msg=$('#msg'),b=$('#b-start'),dg=$('#diag');
+  const msg=$('#nm-msg'),b=$('#nm-b-start'),dg=$('#nm-diag');
   dg.hidden=true;msg.className='small';
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='This browser cannot open the camera. Open the page in Safari.';msg.className='small err';diag('camera',{name:'NoMediaDevices'});return;}
   b.disabled=true;b.textContent='Opening camera';
@@ -403,18 +403,18 @@ async function start(){
     try{landmarker=await loadModel();}
     catch(e){fail('face model',e,'The face model did not load. Check your connection and try again.');stopCam();return;}
   }
-  $('#intro').hidden=true;running=true;startedAt=performance.now();blinks=[];lastA=performance.now();setMode('noface');
+  $('#nm-intro').hidden=true;running=true;startedAt=performance.now();blinks=[];lastA=performance.now();setMode('noface');
   try{if(navigator.wakeLock)navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
   if(!calib)setTimeout(()=>{if(running&&!calib&&!calibrating)toast('Tap Calibrate to turn on the gaze ring',3200);},1500);
 }
 function stopCam(){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}video.srcObject=null;}
-$('#b-start').onclick=start;
+$('#nm-b-start').onclick=start;
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden&&stream){stopCam();setMode('idle');showGaze(false);$('#intro').hidden=false;$('#b-start').disabled=false;$('#b-start').textContent='Resume camera';}
+  if(document.hidden&&stream){stopCam();setMode('idle');showGaze(false);$('#nm-intro').hidden=false;$('#nm-b-start').disabled=false;$('#nm-b-start').textContent='Resume camera';}
 });
 
 let toastT=0;
-function toast(s,ms=1800){const el=$('#toast');el.textContent=s;el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),ms);}
+function toast(s,ms=1800){const el=$('#nm-toast');el.textContent=s;el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),ms);}
 
 /* ---------- signal processing ---------- */
 const bs=(cats,name)=>{for(const c of cats)if(c.categoryName===name)return c.score;return 0;};
@@ -456,8 +456,8 @@ function spread(arr,kx,ky){
 
 function analyze(res,now,dt){
   const faces=res.faceLandmarks||[];
-  $('#t-face').textContent=faces.length;
-  if($('#thumb').classList.contains('show')){
+  $('#nm-t-face').textContent=faces.length;
+  if($('#nm-thumb').classList.contains('show')){
     ov.width=video.videoWidth||640;ov.height=video.videoHeight||480;octx.clearRect(0,0,ov.width,ov.height);
     faces.forEach((lm,fi)=>{octx.fillStyle=fi?'rgba(226,96,31,.9)':'rgba(47,227,200,.9)';
       for(const i of [33,133,159,145,362,263,386,374,468,473,1,10,152,234,454]){const p=lm[i];if(!p)continue;octx.beginPath();octx.arc(p.x*ov.width,p.y*ov.height,3,0,7);octx.fill();}});
@@ -490,8 +490,8 @@ function analyze(res,now,dt){
   cur={t:now,f:[ex,ey,bx,by,nx,ny,hx,hy],blink:blinking};
   if(dbgOn){
     dEx+=(ex-dEx)*0.4;dEy+=(ey-dEy)*0.4;
-    $('#dbg-dot').style.transform=`translate(${clamp(dEx*420,-42,42).toFixed(1)}px,${clamp(dEy*420,-24,24).toFixed(1)}px)`;
-    $('#dbg-t').textContent=`eye x ${dEx>=0?'+':''}${dEx.toFixed(3)}\neye y ${dEy>=0?'+':''}${dEy.toFixed(3)}\nhead ${nx>=0?'+':''}${nx.toFixed(2)} ${ny>=0?'+':''}${ny.toFixed(2)}\n${camInfo} ${delegateUsed}`;
+    $('#nm-dbg-dot').style.transform=`translate(${clamp(dEx*420,-42,42).toFixed(1)}px,${clamp(dEy*420,-24,24).toFixed(1)}px)`;
+    $('#nm-dbg-t').textContent=`eye x ${dEx>=0?'+':''}${dEx.toFixed(3)}\neye y ${dEy>=0?'+':''}${dEy.toFixed(3)}\nhead ${nx>=0?'+':''}${nx.toFixed(2)} ${ny>=0?'+':''}${ny.toFixed(2)}\n${camInfo} ${delegateUsed}`;
   }
 
   // blinks: rising edge above 0.5, reset below 0.3
@@ -500,7 +500,7 @@ function analyze(res,now,dt){
   blinks=blinks.filter(b=>now-b<60000);
   const span=Math.min(60,Math.max(10,(now-startedAt)/1000));
   const bpm=blinks.length*60/span;
-  $('#t-blink').textContent=Math.round(bpm);
+  $('#nm-t-blink').textContent=Math.round(bpm);
 
   // attention
   const looking=Math.abs(yawG)<0.2&&Math.abs(pitchG)<0.22&&Math.abs(bx)<0.6&&by<0.7&&blink<0.85;
@@ -546,7 +546,7 @@ function analyze(res,now,dt){
 
 /* gaze ring: follows the gaze once calibrated, tightens as focus rises */
 function updateRing(){
-  const g=$('#gaze');
+  const g=$('#nm-gaze');
   const on=running&&!calibrating&&mode==='reading'&&(calib||view==='focus');
   g.classList.toggle('show',on);
   if(!on)return;
@@ -568,9 +568,9 @@ function recenter(tx,ty){
     fx1.reset();fy1.reset();medX.length=0;medY.length=0;toast('Re-centered');
   },650);
 }
-$('#b-third').onclick=()=>{if(view==='read'){next();return;}const c=center();toast('Look at the center',650);recenter(c.x,c.y);};
+$('#nm-b-third').onclick=()=>{if(view==='read'){next();return;}const c=center();toast('Look at the center',650);recenter(c.x,c.y);};
 canvas.addEventListener('pointerdown',e=>{if(running&&calib&&!calibrating)recenter(e.clientX,e.clientY);});
-$('#b-cam').onclick=()=>{const on=!$('#thumb').classList.contains('show');dbgOn=on;$('#thumb').classList.toggle('show',on);$('#dbg').classList.toggle('show',on);$('#b-cam').setAttribute('aria-pressed',on);};
+$('#nm-b-cam').onclick=()=>{const on=!$('#nm-thumb').classList.contains('show');dbgOn=on;$('#nm-thumb').classList.toggle('show',on);$('#nm-dbg').classList.toggle('show',on);$('#nm-b-cam').setAttribute('aria-pressed',on);};
 
 /* ---------- calibration: nine points plus a head-movement pass, ridge regression ---------- */
 let calibrating=false;
@@ -625,10 +625,10 @@ function bestOf(samples,keepFrac){
   const mx=median(samples.map(s=>s[0])),my=median(samples.map(s=>s[1]));
   return samples.map(s=>({s,d:Math.hypot(s[0]-mx,s[1]-my)})).sort((a,b)=>a.d-b.d).slice(0,Math.max(4,Math.round(samples.length*keepFrac))).map(o=>o.s);
 }
-$('#b-cal').onclick=async()=>{
+$('#nm-b-cal').onclick=async()=>{
   if(calibrating)return;
-  if(!running){$('#intro').hidden=false;return;}
-  calibrating=true;const C=$('#calib'),d=$('#cdot'),hint=$('#chint'),step=$('#cstep');C.hidden=false;
+  if(!running){$('#nm-intro').hidden=false;return;}
+  calibrating=true;const C=$('#nm-calib'),d=$('#nm-cdot'),hint=$('#nm-chint'),step=$('#nm-cstep');C.hidden=false;
   const pts=[[.5,.5],[.1,.12],[.5,.12],[.9,.12],[.9,.5],[.9,.88],[.5,.88],[.1,.88],[.1,.5]];
   const rows=[],perPoint=[];
   step.textContent='Get ready';
@@ -677,9 +677,9 @@ $('#b-cal').onclick=async()=>{
   const grade=weakEyes?'Rough':err<0.09?'Good':err<0.16?'Fair':'Rough';
   step.textContent=`Calibration: ${grade}`;
   hint.textContent=weakEyes?'Your eye movement was hard to read. Try brighter light on your face, hold the phone a little closer, and keep your head still.':grade==='Rough'?'Usable, but try again with brighter light and the phone held still.':'Rest your eyes on the center target. Tap anywhere you are looking to fine-tune.';
-  if(view==='focus')$('#cap-p').textContent=COACH[coachTier];
+  if(view==='focus')$('#nm-cap-p').textContent=COACH[coachTier];
   await wait(2200);
-  C.hidden=true;calibrating=false;$('#b-cal').textContent='Recalibrate';
+  C.hidden=true;calibrating=false;$('#nm-b-cal').textContent='Recalibrate';
 };
 
 /* ---------- loop ---------- */
@@ -695,13 +695,13 @@ function frame(now){
     try{const res=landmarker.detectForVideo(video,now);analyze(res,now,adt);fpsN++;}catch(e){}
   }
   updateRing();
-  $('#t-focus').textContent=Math.round(F*100)+'%';
+  $('#nm-t-focus').textContent=Math.round(F*100)+'%';
   if(view==='focus'){
-    $('#bar').style.width=(F*100).toFixed(1)+'%';
+    $('#nm-bar').style.width=(F*100).toFixed(1)+'%';
     const tier=F>(coachTier===2?0.68:0.76)?2:F>(coachTier>=1?0.36:0.44)?1:0;
-    if(tier!==coachTier){coachTier=tier;if(calib)$('#cap-p').textContent=COACH[tier];}
-  }else $('#bar').style.width=Math.min(100,dwellT/12*100)+'%';
-  fpsT+=dt;if(fpsT>=1){$('#t-fps').textContent=fpsN;fpsN=0;fpsT=0;}
+    if(tier!==coachTier){coachTier=tier;if(calib)$('#nm-cap-p').textContent=COACH[tier];}
+  }else $('#nm-bar').style.width=Math.min(100,dwellT/12*100)+'%';
+  fpsT+=dt;if(fpsT>=1){$('#nm-t-fps').textContent=fpsN;fpsN=0;fpsT=0;}
   requestAnimationFrame(frame);
 }
 Object.assign(K.tgt,STATES.idle.k);setView('focus');
