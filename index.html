@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nmind Lab</title>
+<meta name="description" content="Nmind camera prototype. Face, attention, blink and gaze sensing on your phone, processed on device.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Nmind Lab">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#090A22">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --abyss:#090A22; --trench:#110F33; --tide:#1C1850; --current:#2E2774;
+  --foam:#F1EEFF; --mist:#A9A5D2;
+  --signal:#2FE3C8; --signal-rgb:47,227,200;
+  --alert:#E2601F; --alert-rgb:226,96,31;
+  --glass:rgba(17,15,51,.72);
+  --f-display:"Unbounded","Manrope",system-ui,sans-serif;
+  --f-body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--abyss);color:var(--foam);font-family:var(--f-body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:10px}
+.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+.label{font-family:var(--f-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mist)}
+
+#k{position:fixed;inset:0;width:100%;height:100%;display:block}
+.shade{position:fixed;inset:0;pointer-events:none;background:radial-gradient(70% 55% at 50% 40%,transparent 40%,rgba(9,10,34,.8) 100%)}
+
+.top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px))}
+.wordmark{font-family:var(--f-display);font-weight:500;font-size:20px;display:flex;align-items:center;gap:9px}
+.wordmark b{font-weight:600;color:var(--signal)}
+.wordmark svg{width:24px;height:24px}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;border:1px solid var(--current);background:var(--glass);font-size:12px;color:var(--mist);white-space:nowrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--signal);box-shadow:0 0 10px rgba(var(--signal-rgb),.9);flex:none}
+.pill[data-tone="ambient"] .dot{background:var(--mist);box-shadow:none}
+.pill[data-tone="alert"]{color:var(--alert);border-color:rgba(var(--alert-rgb),.55)}
+.pill[data-tone="alert"] .dot{background:var(--alert);box-shadow:0 0 10px rgba(var(--alert-rgb),.9)}
+.pill[data-tone="on"]{color:var(--signal);border-color:rgba(var(--signal-rgb),.45)}
+
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;justify-content:center;
+  padding:0 max(12px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 12px) max(12px,env(safe-area-inset-left,0px))}
+.panel{width:100%;max-width:520px;padding:14px;border-radius:22px;background:var(--glass);border:1px solid var(--current);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);display:grid;gap:10px}
+.cap{display:grid;gap:4px;transition:opacity .5s}
+.cap.dim{opacity:.35}
+.cap .kicker{font-family:var(--f-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+.cap p{margin:0;font-size:16px;line-height:1.4}
+.dwell{height:3px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.dwell i{display:block;height:100%;width:0;background:var(--signal);border-radius:3px}
+.tele{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.tele div{min-width:0;padding:7px 4px;border-radius:10px;background:rgba(9,10,34,.6);border:1px solid var(--current);text-align:center}
+.tele b{display:block;font-family:var(--f-data);font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tele span{display:block;font-size:10px;color:var(--mist);line-height:1.2}
+.row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 10px;border-radius:13px;font-weight:600;font-size:14px;border:1px solid var(--current);background:rgba(28,24,80,.7);white-space:nowrap}
+.btn.primary{background:var(--signal);border-color:var(--signal);color:#071318}
+.btn[aria-pressed="true"]{box-shadow:inset 0 0 0 1px var(--signal);color:var(--signal)}
+
+#thumb{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 56px);width:96px;height:128px;border-radius:14px;overflow:hidden;border:1px solid var(--current);background:#000;opacity:0;pointer-events:none;transition:opacity .3s}
+#thumb.show{opacity:1}
+#thumb video,#thumb canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+
+#gaze{position:fixed;z-index:4;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid rgba(var(--signal-rgb),.85);box-shadow:0 0 16px rgba(var(--signal-rgb),.6);pointer-events:none;opacity:0;transition:opacity .4s}
+#gaze.show{opacity:1}
+
+.overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(9,10,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  padding:calc(env(safe-area-inset-top,0px) + 20px) max(20px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 20px) max(20px,env(safe-area-inset-left,0px));overflow:auto}
+.overlay[hidden]{display:none}
+.card{width:100%;max-width:440px;display:grid;gap:14px}
+.card h1{margin:0;font-family:var(--f-display);font-weight:500;font-size:24px;line-height:1.2}
+.card p{margin:0;color:var(--mist)}
+.card ul{margin:0;padding-left:18px;color:var(--mist);display:grid;gap:4px}
+.card .btn{width:100%;padding:14px}
+.small{font-size:12px;color:var(--mist)}
+.err{color:var(--alert)}
+
+#calib{position:fixed;inset:0;z-index:9;background:var(--abyss)}
+#calib[hidden]{display:none}
+#calib .hint{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 50%);transform:translateY(60px);text-align:center;color:var(--mist);font-size:14px;padding:0 24px}
+#cdot{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid var(--signal);background:rgba(var(--signal-rgb),.18);box-shadow:0 0 22px rgba(var(--signal-rgb),.85);transition:left .9s cubic-bezier(.6,0,.2,1),top .9s cubic-bezier(.6,0,.2,1),transform .3s}
+#cdot::after{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--signal)}
+#cdot.hold{transform:scale(.7)}
+@media (prefers-reduced-motion: reduce){#cdot{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="k" aria-hidden="true"></canvas>
+<div class="shade"></div>
+
+<header class="top">
+  <div class="wordmark" aria-label="Nmind Lab">
+    <svg viewBox="0 0 26 26" aria-hidden="true"><g fill="none" stroke="var(--signal)" stroke-width="1.3"><ellipse cx="13" cy="13" rx="11" ry="4.3"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(45 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(90 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(135 13 13)"/></g><circle cx="13" cy="13" r="2.4" fill="var(--alert)"/></svg>
+    <span>n<b>mind</b> lab</span>
+  </div>
+  <span class="pill" id="state"><span class="dot"></span><span id="state-t">Camera off</span></span>
+</header>
+
+<div id="thumb"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
+<div id="gaze" aria-hidden="true"></div>
+
+<div class="dock">
+  <div class="panel">
+    <div class="cap" id="cap">
+      <span class="kicker" id="cap-k">Win before the battle</span>
+      <p id="cap-p">Many calculations lead to victory. Few lead to defeat.</p>
+    </div>
+    <div class="dwell" aria-hidden="true"><i id="dwell"></i></div>
+    <div class="tele" aria-label="Live camera signals">
+      <div><b id="t-face">0</b><span>faces</span></div>
+      <div><b id="t-att">off</b><span>attention</span></div>
+      <div><b id="t-blink">0</b><span>blinks/min</span></div>
+      <div><b id="t-fps">0</b><span>frames/sec</span></div>
+    </div>
+    <div class="row">
+      <button class="btn" id="b-cal">Calibrate</button>
+      <button class="btn" id="b-cam" aria-pressed="false">Camera view</button>
+      <button class="btn" id="b-next">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="intro">
+  <div class="card">
+    <span class="label">Prototype · camera test</span>
+    <h1>See what your phone can sense</h1>
+    <p>Nmind Lab uses your front camera to find your face and eyes, then drives the shapes from what it sees.</p>
+    <ul>
+      <li>Look away and the shapes go quiet. Look back and they resume.</li>
+      <li>A second face pauses the session.</li>
+      <li>Blinks are counted. Calibrate to see a rough gaze point.</li>
+    </ul>
+    <button class="btn primary" id="b-start">Start camera</button>
+    <p class="small" id="msg">Everything runs on this phone. No video or images are saved or sent anywhere, and nothing is tracked.</p>
+  </div>
+</div>
+
+<div id="calib" hidden>
+  <div id="cdot" style="left:50%;top:50%"></div>
+  <div class="hint" id="chint">Keep your head still and follow the dot with your eyes.</div>
+</div>
+
+<script type="module">
+import {FaceLandmarker, FilesetResolver} from './lib/vision_bundle.mjs';
+
+const $=s=>document.querySelector(s);
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- content (Sun Tzu, Giles translation, public domain) ---------- */
+const CONCEPTS=[
+  {k:"Win before the battle",folds:8,p:"Many calculations lead to victory. Few lead to defeat."},
+  {k:"Five constant factors",folds:5,p:"Five things decide every contest. Check all five before you act."},
+  {k:"All warfare is deception",folds:7,p:"Appear weak when strong. Appear far when near."},
+  {k:"Attack where unprepared",folds:10,p:"Strike where they are not ready. Appear where you are not expected."},
+  {k:"Speed over perfection",folds:12,p:"Long campaigns drain everything. Move fast."}
+];
+let ci=0;
+function paint(){const c=CONCEPTS[ci];$('#cap-k').textContent=c.k;$('#cap-p').textContent=c.p;K.tgt.folds=c.folds;}
+
+/* ---------- kaleidoscope (rings, arcs and petals; no pointed stars; smooth changes only, no flashing) ---------- */
+const PAL={signal:[47,227,200],alert:[226,96,31],mist:[169,165,210],violet:[122,92,230]};
+const mix=(a,b,t)=>a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+const rgba=(c,a)=>`rgba(${c[0]},${c[1]},${c[2]},${Math.max(0,a).toFixed(3)})`;
+const canvas=$('#k'),ctx=canvas.getContext('2d');
+const K={t:0,w:1,h:1,cur:{folds:8,alpha:1,tempo:1,sat:1,alert:0,scale:1,glyph:1},tgt:{folds:8,alpha:1,tempo:1,sat:1,alert:0,scale:1,glyph:1}};
+function fit(){const d=Math.min(2,devicePixelRatio||1);K.w=innerWidth;K.h=innerHeight;canvas.width=K.w*d;canvas.height=K.h*d;ctx.setTransform(d,0,0,d,0,0);ctx.fillStyle='#090A22';ctx.fillRect(0,0,K.w,K.h);}
+addEventListener('resize',fit);fit();
+function draw(dt){
+  const c=K.cur,g=K.tgt,e=Math.min(1,dt*1.6);   // slow easing keeps every change gradual
+  for(const k in g)c[k]+=(g[k]-c[k])*e;
+  K.t+=dt*(reduce?0.2:1)*c.tempo;
+  const t=K.t,w=K.w,h=K.h;
+  ctx.globalCompositeOperation='source-over';ctx.fillStyle=rgba([9,10,34],reduce?0.5:0.13);ctx.fillRect(0,0,w,h);
+  let folds=Math.max(3,Math.round(c.folds));if(folds===6)folds=c.folds<6?5:7;
+  const R=Math.min(w,h)*0.46*c.scale, sig=mix(PAL.mist,PAL.signal,c.sat), vio=mix(PAL.mist,PAL.violet,c.sat), A=c.alpha;
+  ctx.save();ctx.translate(w/2,h*0.4);ctx.globalCompositeOperation='lighter';ctx.lineWidth=Math.max(0.8,R/180);
+  for(let i=0;i<folds;i++){
+    ctx.save();ctx.rotate(t*0.05+i*2*Math.PI/folds);if(i%2)ctx.scale(1,-1);
+    const half=Math.PI/folds;
+    for(let L=0;L<6;L++){
+      const f=(L+1)/7,r=R*f,a=half*(0.5+0.45*Math.sin(t*0.55+L*1.7));
+      const x=Math.cos(a)*r,y=Math.sin(a)*r,s=R*(0.035+0.03*(0.5+0.5*Math.sin(t*0.9+L*2.1)));
+      const col=L%2?sig:vio,fade=A*(0.85-f*0.45);
+      ctx.strokeStyle=rgba(col,fade*0.85);ctx.beginPath();ctx.ellipse(x,y,s*2.2,s*0.7,a+t*0.25*(L%2?1:-1),0,Math.PI*2);ctx.stroke();
+      ctx.strokeStyle=rgba(L%3===0?mix(col,PAL.alert,c.alert):col,fade*0.55);ctx.beginPath();ctx.arc(x*0.72,y*0.72,s*1.5,0,Math.PI*2);ctx.stroke();
+      const a0=t*0.4*(L%2?-1:1)+L;ctx.strokeStyle=rgba(col,fade*0.75);ctx.beginPath();ctx.arc(x*0.72,y*0.72,s*2.3,a0,a0+Math.PI*0.7);ctx.stroke();
+      ctx.fillStyle=rgba(col,fade*0.7);ctx.beginPath();ctx.arc(x*1.08,y*1.08,s*0.28,0,Math.PI*2);ctx.fill();
+    }
+    ctx.strokeStyle=rgba(vio,A*0.16);ctx.beginPath();ctx.moveTo(R*0.12,0);ctx.lineTo(R,0);ctx.stroke();
+    ctx.restore();
+  }
+  ctx.strokeStyle=rgba(c.alert>0.5?PAL.alert:sig,A*0.22+c.alert*0.4);ctx.beginPath();ctx.arc(0,0,R*1.02,0,Math.PI*2);ctx.stroke();
+  if(c.glyph>0.02){
+    const p=0.5+0.5*Math.sin(t*1.6),gR=R*(0.13+0.03*p);
+    ctx.strokeStyle=rgba(sig,c.glyph*A*(0.65+0.35*p));ctx.lineWidth=Math.max(1.2,R/110);ctx.beginPath();
+    for(let v=0;v<=folds;v++){const th=-Math.PI/2+v*2*Math.PI/folds+t*0.12;v?ctx.lineTo(Math.cos(th)*gR,Math.sin(th)*gR):ctx.moveTo(Math.cos(th)*gR,Math.sin(th)*gR);}
+    ctx.stroke();ctx.fillStyle=rgba(PAL.alert,c.glyph*A*0.9);ctx.beginPath();ctx.arc(0,0,R*0.022*(1+p*0.5),0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---------- states ---------- */
+const STATES={
+  idle:{t:'Camera off',tone:'ambient',k:{alpha:0.5,tempo:0.3,sat:0.2,glyph:0,alert:0,scale:1}},
+  reading:{t:'Communicating',tone:'on',k:{alpha:1,tempo:1,sat:1,glyph:1,alert:0,scale:1}},
+  away:{t:'Paused · look back',tone:'ambient',k:{alpha:0.45,tempo:0.25,sat:0.15,glyph:0,alert:0,scale:1.08}},
+  noface:{t:'No face found',tone:'ambient',k:{alpha:0.4,tempo:0.2,sat:0.1,glyph:0,alert:0,scale:1.08}},
+  second:{t:'Second face · paused',tone:'alert',k:{alpha:0.3,tempo:0.05,sat:0,glyph:0,alert:1,scale:0.92}}
+};
+let mode='idle';
+function setMode(m){
+  if(m===mode)return;mode=m;const s=STATES[m];
+  $('#state-t').textContent=s.t;$('#state').dataset.tone=s.tone;
+  Object.assign(K.tgt,s.k);K.tgt.folds=CONCEPTS[ci].folds;
+  $('#cap').classList.toggle('dim',m!=='reading');
+  $('#t-att').textContent=m==='reading'?'on you':m==='idle'?'off':m==='second'?'shared':'away';
+}
+
+/* ---------- camera + face model ---------- */
+const video=$('#v'),ov=$('#ov'),octx=ov.getContext('2d');
+let landmarker=null,stream=null,running=false,lastVT=-1;
+async function loadModel(){
+  const fileset=await FilesetResolver.forVisionTasks('./lib/wasm');
+  const opts=d=>({baseOptions:{modelAssetPath:'./models/face_landmarker.task',delegate:d},runningMode:'VIDEO',numFaces:2,outputFaceBlendshapes:true,minFaceDetectionConfidence:0.5,minFacePresenceConfidence:0.5,minTrackingConfidence:0.5});
+  try{return await FaceLandmarker.createFromOptions(fileset,opts('GPU'));}
+  catch(e){return await FaceLandmarker.createFromOptions(fileset,opts('CPU'));}
+}
+async function start(){
+  const msg=$('#msg'),b=$('#b-start');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='This browser cannot open the camera. Open the page in Safari.';msg.className='small err';return;}
+  b.disabled=true;b.textContent='Opening camera';
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
+  }catch(e){
+    b.disabled=false;b.textContent='Try again';
+    msg.textContent=e&&e.name==='NotAllowedError'?'Camera access was declined. In Safari, tap aA in the address bar, open Website Settings, set Camera to Allow, then try again.':'The camera could not start ('+(e&&e.name||'error')+').';
+    msg.className='small err';return;
+  }
+  video.srcObject=stream;try{await video.play();}catch(e){}
+  b.textContent='Loading face model';
+  if(!landmarker){
+    try{landmarker=await loadModel();}
+    catch(e){b.disabled=false;b.textContent='Try again';msg.textContent='The face model did not load. Check your connection and try again.';msg.className='small err';stopCam();return;}
+  }
+  $('#intro').hidden=true;running=true;startedAt=performance.now();blinks=[];lastA=performance.now();setMode('noface');
+  try{if(navigator.wakeLock)navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
+}
+function stopCam(){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}video.srcObject=null;}
+$('#b-start').onclick=start;
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden&&stream){stopCam();setMode('idle');$('#intro').hidden=false;$('#b-start').disabled=false;$('#b-start').textContent='Resume camera';}
+});
+
+/* ---------- signal processing ---------- */
+const bs=(cats,name)=>{for(const c of cats)if(c.categoryName===name)return c.score;return 0;};
+let startedAt=performance.now(),seenAt=0,secondT=0,lookT=0,awayT=0,blinkOn=false,blinks=[],fpsN=0,fpsT=0,dwellT=0;
+let feat={x:0,y:0},calib=null,gazeS=null;
+function analyze(res,now,dt){
+  const faces=res.faceLandmarks||[];
+  $('#t-face').textContent=faces.length;
+  // overlay of eye points in the camera thumbnail
+  if($('#thumb').classList.contains('show')){
+    ov.width=video.videoWidth||640;ov.height=video.videoHeight||480;octx.clearRect(0,0,ov.width,ov.height);
+    faces.forEach((lm,fi)=>{octx.fillStyle=fi?'rgba(226,96,31,.9)':'rgba(47,227,200,.9)';
+      for(const i of [33,133,159,145,362,263,386,374,468,473,1,10,152,234,454]){const p=lm[i];if(!p)continue;octx.beginPath();octx.arc(p.x*ov.width,p.y*ov.height,3,0,7);octx.fill();}});
+  }
+  if(faces.length===0){secondT=0;if(now-seenAt>700)setMode('noface');showGaze(false);return;}
+  seenAt=now;
+  if(faces.length>=2){secondT+=dt;if(secondT>0.4){setMode('second');showGaze(false);return;}}else secondT=0;
+  const lm=faces[0],cats=(res.faceBlendshapes&&res.faceBlendshapes[0])?res.faceBlendshapes[0].categories:[];
+  // head pose from landmark geometry
+  const n=lm[1],l=lm[234],r=lm[454],fo=lm[10],ch=lm[152];
+  const yaw=((n.x-l.x)/Math.max(1e-3,r.x-l.x))-0.5;
+  const pitch=((n.y-fo.y)/Math.max(1e-3,ch.y-fo.y))-0.55;
+  // eye direction from blendshapes
+  const gx=(bs(cats,'eyeLookOutRight')+bs(cats,'eyeLookInLeft')-bs(cats,'eyeLookOutLeft')-bs(cats,'eyeLookInRight'))/2;
+  const gy=(bs(cats,'eyeLookDownLeft')+bs(cats,'eyeLookDownRight')-bs(cats,'eyeLookUpLeft')-bs(cats,'eyeLookUpRight'))/2;
+  const blink=(bs(cats,'eyeBlinkLeft')+bs(cats,'eyeBlinkRight'))/2;
+  feat.x+=(gx+yaw*1.4-feat.x)*0.35;feat.y+=(gy+pitch*1.4-feat.y)*0.35;
+  // blinks: rising edge above 0.5, reset below 0.3
+  if(!blinkOn&&blink>0.5){blinkOn=true;blinks.push(now);}
+  else if(blinkOn&&blink<0.3)blinkOn=false;
+  blinks=blinks.filter(b=>now-b<60000);
+  const span=Math.min(60,Math.max(10,(now-startedAt)/1000));
+  $('#t-blink').textContent=Math.round(blinks.length*60/span);
+  // attention: head roughly toward screen and eyes not far off to the side
+  const looking=Math.abs(yaw)<0.2&&Math.abs(pitch)<0.22&&Math.abs(gx)<0.6&&gy<0.7&&blink<0.85;
+  if(looking){lookT+=dt;awayT=0;}else{awayT+=dt;lookT=0;}
+  if(mode!=='reading'&&lookT>0.3)setMode('reading');
+  if(mode==='reading'&&awayT>0.7)setMode('away');
+  if(mode==='noface'||mode==='second')setMode(looking?'reading':'away');
+  // dwell: holding attention on a concept for 12 s advances it
+  if(mode==='reading'){dwellT+=dt;if(dwellT>12){dwellT=0;next();}}
+  $('#dwell').style.width=Math.min(100,dwellT/12*100)+'%';
+  if(calib&&mode==='reading'){
+    const sx=calib.ax+calib.bx*feat.x, sy=calib.ay+calib.by*feat.y;
+    const x=Math.min(innerWidth-12,Math.max(12,sx)), y=Math.min(innerHeight-12,Math.max(12,sy));
+    gazeS=gazeS?{x:gazeS.x+(x-gazeS.x)*0.2,y:gazeS.y+(y-gazeS.y)*0.2}:{x,y};
+    const g=$('#gaze');g.style.left=gazeS.x+'px';g.style.top=gazeS.y+'px';showGaze(true);
+  }else showGaze(false);
+}
+function showGaze(on){$('#gaze').classList.toggle('show',!!on&&!!calib);}
+function next(){ci=(ci+1)%CONCEPTS.length;dwellT=0;paint();}
+$('#b-next').onclick=next;
+$('#b-cam').onclick=()=>{const on=!$('#thumb').classList.contains('show');$('#thumb').classList.toggle('show',on);$('#b-cam').setAttribute('aria-pressed',on);};
+
+/* ---------- calibration: five points, least-squares fit per axis ---------- */
+let calibrating=false;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+$('#b-cal').onclick=async()=>{
+  if(calibrating)return;
+  if(!running){$('#intro').hidden=false;return;}
+  calibrating=true;const C=$('#calib'),d=$('#cdot'),hint=$('#chint');C.hidden=false;
+  const P=[[0.5,0.42],[0.15,0.12],[0.85,0.12],[0.85,0.88],[0.15,0.88]];
+  const samples=[];
+  hint.textContent='Keep your head still and follow the dot with your eyes.';
+  d.style.left='50%';d.style.top='42%';await wait(1200);
+  for(const [px,py] of P){
+    d.classList.remove('hold');d.style.left=(px*100)+'%';d.style.top=(py*100)+'%';
+    await wait(1000);d.classList.add('hold');
+    const xs=[],ys=[],t0=performance.now();
+    while(performance.now()-t0<900){xs.push(feat.x);ys.push(feat.y);await wait(33);}
+    const avg=a=>a.reduce((s,v)=>s+v,0)/Math.max(1,a.length);
+    samples.push({sx:px*innerWidth,sy:py*innerHeight,fx:avg(xs),fy:avg(ys)});
+  }
+  d.classList.remove('hold');
+  const lsq=(xs,ys)=>{const n=xs.length,mx=xs.reduce((a,b)=>a+b)/n,my=ys.reduce((a,b)=>a+b)/n;let num=0,den=0;for(let i=0;i<n;i++){num+=(xs[i]-mx)*(ys[i]-my);den+=(xs[i]-mx)**2;}const b=den>1e-6?num/den:0;return{a:my-b*mx,b};};
+  const fx=lsq(samples.map(s=>s.fx),samples.map(s=>s.sx)), fy=lsq(samples.map(s=>s.fy),samples.map(s=>s.sy));
+  if(!fx.b||!fy.b){hint.textContent='Not enough eye movement was seen. Try again and move only your eyes.';await wait(2200);C.hidden=true;calibrating=false;return;}
+  calib={ax:fx.a,bx:fx.b,ay:fy.a,by:fy.b};gazeS=null;
+  hint.textContent='Done. The ring shows roughly where you are looking.';await wait(1400);
+  C.hidden=true;calibrating=false;$('#b-cal').textContent='Recalibrate';
+};
+
+/* ---------- loop ---------- */
+let last=performance.now(),lastA=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  draw(dt);
+  if(running&&landmarker&&video.readyState>=2&&video.currentTime!==lastVT){
+    lastVT=video.currentTime;
+    const adt=Math.min(0.25,(now-lastA)/1000);lastA=now;
+    try{const res=landmarker.detectForVideo(video,now);analyze(res,now,adt);fpsN++;}catch(e){}
+  }
+  fpsT+=dt;if(fpsT>=1){$('#t-fps').textContent=fpsN;fpsN=0;fpsT=0;}
+  requestAnimationFrame(frame);
+}
+paint();Object.assign(K.tgt,STATES.idle.k);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
