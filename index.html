@@ -11,6 +11,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#090A22">
 <link rel="manifest" href="manifest.webmanifest">
+<script>
+window.__nmErr=function(stage,e){try{var d=document.getElementById('diag');if(!d)return;d.textContent='Details: '+stage+' · '+((e&&e.name)||'Error')+((e&&e.message)?' · '+String(e.message).slice(0,140):'')+' · v4';d.hidden=false;}catch(x){}};
+window.addEventListener('error',function(ev){if(document.getElementById('intro')&&!document.getElementById('intro').hidden)window.__nmErr('page',ev.error||{name:'ScriptError',message:ev.message||(ev.target&&ev.target.src)||''});},true);
+window.addEventListener('unhandledrejection',function(ev){if(document.getElementById('intro')&&!document.getElementById('intro').hidden)window.__nmErr('page',ev.reason);});
+</script>
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -100,6 +105,7 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 .card .btn{width:100%;padding:14px}
 .small{font-size:12px;color:var(--mist)}
 .err{color:var(--alert)}
+.diag{margin-top:8px;font-family:var(--f-data);font-size:10px;line-height:1.4;color:var(--mist);opacity:.85;word-break:break-word}
 
 #calib{position:fixed;inset:0;z-index:9;background:var(--abyss)}
 #calib[hidden]{display:none}
@@ -130,10 +136,6 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 
 <div class="dock">
   <div class="panel">
-    <div class="seg" aria-label="Mode">
-      <button id="v-focus" aria-pressed="true">Focus</button>
-      <button id="v-read" aria-pressed="false">Read</button>
-    </div>
     <div class="cap" id="cap">
       <span class="kicker" id="cap-k">Focus</span>
       <p id="cap-p">Breathe slowly. Rest your eyes on the center.</p>
@@ -165,6 +167,7 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
     </ul>
     <button class="btn primary" id="b-start">Start camera</button>
     <p class="small" id="msg">Everything runs on this phone. No video or images are saved or sent anywhere, and nothing is tracked.</p>
+    <p class="diag" id="diag" hidden></p>
   </div>
 </div>
 
@@ -322,40 +325,83 @@ function setMode(m){
 }
 function setView(v){
   view=v;
-  $('#v-focus').setAttribute('aria-pressed',v==='focus');$('#v-read').setAttribute('aria-pressed',v==='read');
   $('#b-third').textContent=v==='focus'?'Re-center':'Next';
   if(v==='read'){const c=CONCEPTS[ci];$('#cap-k').textContent=c.k;$('#cap-p').textContent=c.p;K.tgt.fidx=FOLDS.indexOf(c.folds);}
   else{$('#cap-k').textContent='Focus';$('#cap-p').textContent=calib?COACH[coachTier]:COACH0;}
   label();
 }
-$('#v-focus').onclick=()=>setView('focus');
-$('#v-read').onclick=()=>setView('read');
 
 /* ---------- camera + face model ---------- */
 const video=$('#v'),ov=$('#ov'),octx=ov.getContext('2d');
 let landmarker=null,stream=null,running=false,lastVT=-1;
+const standalone=!!(navigator.standalone||(typeof matchMedia==='function'&&matchMedia('(display-mode: standalone)').matches));
+const iosV=((navigator.userAgent||'').match(/OS (\d+)[_.](\d+)/)||[]).slice(1,3).join('.');
+let delegateUsed='',camInfo='';
+function diag(stage,e){
+  const d=$('#diag');
+  d.textContent='Details: '+stage+' · '+(e&&e.name||'Error')+(e&&e.message?' · '+String(e.message).slice(0,140):'')+' · '+(standalone?'home-screen app':'browser')+(iosV?' · iOS '+iosV:'')+' · v4';
+  d.hidden=false;
+}
 async function loadModel(){
   const fileset=await FilesetResolver.forVisionTasks('./lib/wasm');
   const opts=d=>({baseOptions:{modelAssetPath:'./models/face_landmarker.task',delegate:d},runningMode:'VIDEO',numFaces:2,outputFaceBlendshapes:true,minFaceDetectionConfidence:0.5,minFacePresenceConfidence:0.5,minTrackingConfidence:0.5});
-  try{return await FaceLandmarker.createFromOptions(fileset,opts('GPU'));}
-  catch(e){return await FaceLandmarker.createFromOptions(fileset,opts('CPU'));}
+  try{const m=await FaceLandmarker.createFromOptions(fileset,opts('GPU'));delegateUsed='GPU';return m;}
+  catch(e){const m=await FaceLandmarker.createFromOptions(fileset,opts('CPU'));delegateUsed='CPU';return m;}
+}
+// Try the sharpest camera first, then step down to the settings that worked before, then plain defaults.
+const CAM_TRIES=[
+  {facingMode:'user',width:{ideal:1280},height:{ideal:720}},
+  {facingMode:'user',width:{ideal:640},height:{ideal:480}},
+  {facingMode:'user'},
+  true
+];
+async function openCamera(){
+  let lastErr=null;
+  for(let i=0;i<CAM_TRIES.length;i++){
+    try{return await navigator.mediaDevices.getUserMedia({audio:false,video:CAM_TRIES[i]});}
+    catch(e){
+      lastErr=e;
+      if(e&&(e.name==='NotAllowedError'||e.name==='SecurityError'))throw e; // a refusal, not a settings problem
+      if(e&&(e.name==='NotReadableError'||e.name==='AbortError'))await new Promise(r=>setTimeout(r,400));
+    }
+  }
+  throw lastErr||new Error('no camera');
+}
+function waitVideo(ms){
+  return new Promise(res=>{
+    if(video.readyState>=2&&video.videoWidth)return res(true);
+    const done=ok=>{clearTimeout(t);video.removeEventListener('loadeddata',on);res(ok);};
+    const on=()=>done(true);const t=setTimeout(()=>done(video.readyState>=2),ms);
+    video.addEventListener('loadeddata',on);
+  });
 }
 async function start(){
-  const msg=$('#msg'),b=$('#b-start');
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='This browser cannot open the camera. Open the page in Safari.';msg.className='small err';return;}
+  const msg=$('#msg'),b=$('#b-start'),dg=$('#diag');
+  dg.hidden=true;msg.className='small';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='This browser cannot open the camera. Open the page in Safari.';msg.className='small err';diag('camera',{name:'NoMediaDevices'});return;}
   b.disabled=true;b.textContent='Opening camera';
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
-  }catch(e){
-    b.disabled=false;b.textContent='Try again';
-    msg.textContent=e&&e.name==='NotAllowedError'?'Camera access was declined. In Safari, tap aA in the address bar, open Website Settings, set Camera to Allow, then try again.':'The camera could not start ('+(e&&e.name||'error')+').';
-    msg.className='small err';return;
+  const fail=(stage,e,text)=>{b.disabled=false;b.textContent='Try again';msg.textContent=text;msg.className='small err';diag(stage,e);};
+  try{stream=await openCamera();}
+  catch(e){
+    const denied=e&&(e.name==='NotAllowedError'||e.name==='SecurityError');
+    fail('camera',e,denied?(standalone
+      ?'The home-screen app was not allowed to use the camera. Close Nmind fully, open it again and tap Allow when asked. If no prompt appears, open seth-merica.github.io/nmind-lab in Safari instead.'
+      :'Camera access was declined. In Safari, tap aA in the address bar, open Website Settings, set Camera to Allow, then try again.')
+      :'The camera could not start. Close other apps that use the camera, then try again.');
+    return;
   }
-  video.srcObject=stream;try{await video.play();}catch(e){}
+  video.srcObject=stream;
+  try{await video.play();}catch(e){}
+  if(!(await waitVideo(4000))){
+    try{await video.play();}catch(e){}
+    if(!(await waitVideo(3000))){fail('video',{name:'NoFrames',message:'camera opened but sent no picture'},'The camera opened but sent no picture. Tap Try again.');stopCam();return;}
+  }
+  const tr=stream.getVideoTracks()[0],st=tr&&tr.getSettings?tr.getSettings():{};
+  camInfo=(st.width||video.videoWidth)+'×'+(st.height||video.videoHeight);
   b.textContent='Loading face model';
   if(!landmarker){
     try{landmarker=await loadModel();}
-    catch(e){b.disabled=false;b.textContent='Try again';msg.textContent='The face model did not load. Check your connection and try again.';msg.className='small err';stopCam();return;}
+    catch(e){fail('face model',e,'The face model did not load. Check your connection and try again.');stopCam();return;}
   }
   $('#intro').hidden=true;running=true;startedAt=performance.now();blinks=[];lastA=performance.now();setMode('noface');
   try{if(navigator.wakeLock)navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
@@ -445,7 +491,7 @@ function analyze(res,now,dt){
   if(dbgOn){
     dEx+=(ex-dEx)*0.4;dEy+=(ey-dEy)*0.4;
     $('#dbg-dot').style.transform=`translate(${clamp(dEx*420,-42,42).toFixed(1)}px,${clamp(dEy*420,-24,24).toFixed(1)}px)`;
-    $('#dbg-t').textContent=`eye x ${dEx>=0?'+':''}${dEx.toFixed(3)}\neye y ${dEy>=0?'+':''}${dEy.toFixed(3)}\nhead ${nx>=0?'+':''}${nx.toFixed(2)} ${ny>=0?'+':''}${ny.toFixed(2)}`;
+    $('#dbg-t').textContent=`eye x ${dEx>=0?'+':''}${dEx.toFixed(3)}\neye y ${dEy>=0?'+':''}${dEy.toFixed(3)}\nhead ${nx>=0?'+':''}${nx.toFixed(2)} ${ny>=0?'+':''}${ny.toFixed(2)}\n${camInfo} ${delegateUsed}`;
   }
 
   // blinks: rising edge above 0.5, reset below 0.3
