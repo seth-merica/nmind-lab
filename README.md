@@ -1,17 +1,22 @@
-# Nmind Lab
+# Nmind
 
-Camera prototype for Nmind. It uses the phone's front camera to read the reader's face and eyes, and turns calm, steady focus into something you can see.
+Focus training prototype. It reads your eyes with the phone's front camera. Hold the ring on the center with your eyes alone and the geometry grows richer, more detailed and more luminous. Let it drift and the shapes loosen and dim.
+
+## Install on iPhone
+
+Open the page in Safari, tap Share, then Add to Home Screen. It opens full screen as Nmind and works offline after the first visit.
 
 ## Focus mode (default)
 
-- A focus score builds from how steady your eyes are, how still your head is, how much you stay on the screen, and a calm blink rhythm.
-- As focus rises, the gaze ring tightens and steadies, and the geometry grows, gains layers and locks into symmetry.
-- As focus drops, the ring widens and the shapes loosen, drift and scatter.
+- Focus builds mainly from holding the ring on the center target, plus steady eyes, a still head, staying on screen and a calm blink rhythm.
+- As focus rises, the ring tightens, and the geometry grows, gains layers, petals and fine detail, and shifts from deep purple to teal to luminous.
+- As focus drops, the ring widens and the shapes loosen, dim and scatter.
 
 ## Gaze ring
 
 - Nine-point calibration, then a short pass where you keep your eyes on the dot and move your head, so the fit learns to cancel head motion.
-- Uses iris position between the eye corners, eye-direction scores and head pose, combined with a ridge-regression fit.
+- The eyes drive the ring: iris position inside each eye (between the corners), plus eye-direction scores. Head pose is used only to correct for head turns.
+- Camera view shows a live readout of the raw iris offset, so you can see it move when only your eyes move.
 - Smoothed with a median filter and a One Euro filter. Higher focus means heavier smoothing.
 - Tap anywhere you are looking to fine-tune, or use Re-center while looking at the middle.
 

@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Nmind Lab</title>
-<meta name="description" content="Nmind camera prototype. Calm focus steadies the gaze ring and grows the geometry. Processed on device.">
+<title>Nmind</title>
+<meta name="description" content="Nmind focus training prototype. Hold the ring on the center with your eyes and the geometry grows. Processed on device.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Nmind Lab">
+<meta name="apple-mobile-web-app-title" content="Nmind">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#090A22">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -58,7 +59,7 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 .cap.dim{opacity:.35}
 .cap .kicker{font-family:var(--f-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
 .cap p{margin:0;font-size:16px;line-height:1.4;transition:opacity .6s}
-.bar{height:4px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
+.bar{height:6px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--mist),var(--signal));border-radius:4px}
 .tele{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .tele div{min-width:0;padding:7px 4px;border-radius:10px;background:rgba(9,10,34,.6);border:1px solid var(--current);text-align:center}
@@ -75,6 +76,14 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 
 #thumb{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 56px);width:96px;height:128px;border-radius:14px;overflow:hidden;border:1px solid var(--current);background:#000;opacity:0;pointer-events:none;transition:opacity .3s}
 #thumb.show{opacity:1}
+#dbg{position:fixed;z-index:6;right:max(16px,env(safe-area-inset-right,0px));top:calc(env(safe-area-inset-top,0px) + 192px);width:96px;padding:6px;border-radius:12px;border:1px solid var(--current);background:var(--glass);opacity:0;pointer-events:none;transition:opacity .3s;font-family:var(--f-data);font-size:10px;line-height:1.35;color:var(--mist)}
+#dbg.show{opacity:1}
+#dbg .box{position:relative;height:54px;border-radius:8px;background:rgba(9,10,34,.7);border:1px solid var(--current);margin-bottom:4px;overflow:hidden}
+#dbg .box::before,#dbg .box::after{content:"";position:absolute;background:rgba(169,165,210,.25)}
+#dbg .box::before{left:50%;top:0;bottom:0;width:1px}
+#dbg .box::after{top:50%;left:0;right:0;height:1px}
+#dbg i{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--signal);box-shadow:0 0 8px rgba(var(--signal-rgb),.9)}
+.tag{font-family:var(--f-data);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mist);border:1px solid var(--current);border-radius:6px;padding:2px 5px;margin-left:2px}
 #thumb video,#thumb canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 
 #gaze{position:fixed;z-index:4;left:50%;top:40%;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;border:2px solid rgba(var(--signal-rgb),var(--ring,.5));box-shadow:0 0 18px rgba(var(--signal-rgb),calc(var(--ring,.5)*.7));pointer-events:none;opacity:0;transition:opacity .5s;will-change:transform,left,top}
@@ -109,12 +118,13 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 <header class="top">
   <div class="wordmark" aria-label="Nmind Lab">
     <svg viewBox="0 0 26 26" aria-hidden="true"><g fill="none" stroke="var(--signal)" stroke-width="1.3"><ellipse cx="13" cy="13" rx="11" ry="4.3"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(45 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(90 13 13)"/><ellipse cx="13" cy="13" rx="11" ry="4.3" transform="rotate(135 13 13)"/></g><circle cx="13" cy="13" r="2.4" fill="var(--alert)"/></svg>
-    <span>n<b>mind</b> lab</span>
+    <span>n<b>mind</b></span><span class="tag">prototype</span>
   </div>
   <span class="pill" id="state"><span class="dot"></span><span id="state-t">Camera off</span></span>
 </header>
 
 <div id="thumb"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
+<div id="dbg" aria-hidden="true"><div class="box"><i id="dbg-dot"></i></div><span id="dbg-t" style="white-space:pre">eyes</span></div>
 <div id="gaze" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
 
@@ -145,13 +155,12 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 
 <div class="overlay" id="intro">
   <div class="card">
-    <span class="label">Prototype · camera test</span>
-    <h1>Calm focus, made visible</h1>
-    <p>Nmind Lab reads your eyes with the front camera. The calmer and steadier you are, the tighter the ring and the fuller the shapes.</p>
+    <span class="label">Prototype · focus training</span>
+    <h1>Train calm focus</h1>
+    <p>Nmind reads your eyes with the front camera. Hold the ring on the center with your eyes alone and the geometry grows richer, more detailed and more luminous. Let it drift and the shapes loosen and dim.</p>
     <ul>
-      <li>Calibrate once by following a dot through nine spots.</li>
-      <li>Breathe, keep still and rest your eyes on the center. The shapes grow and lock into symmetry.</li>
-      <li>Let your attention drift and they loosen and scatter.</li>
+      <li>Calibrate once: keep your head still and follow the dot with your eyes.</li>
+      <li>Rest your eyes on the center target and breathe slowly.</li>
       <li>Look away or let a second face in and it pauses.</li>
     </ul>
     <button class="btn primary" id="b-start">Start camera</button>
@@ -161,7 +170,7 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 
 <div id="calib" hidden>
   <div id="cdot" style="left:50%;top:50%"></div>
-  <div class="hint"><b id="cstep">Get ready</b><span id="chint">Hold the phone at reading distance. Keep your head still and follow the dot with your eyes.</span></div>
+  <div class="hint"><b id="cstep">Get ready</b><span id="chint">Hold the phone at reading distance. Keep your head still and move only your eyes.</span></div>
 </div>
 
 <script type="module">
@@ -181,7 +190,8 @@ const CONCEPTS=[
   {k:"Attack where unprepared",folds:10,p:"Strike where they are not ready. Appear where you are not expected."},
   {k:"Speed over perfection",folds:12,p:"Long campaigns drain everything. Move fast."}
 ];
-const COACH=["Breathe slowly. Rest your eyes on the center.","Good. Let your gaze settle and soften.","Steady. Hold it there."];
+const COACH=["Rest your eyes on the center target. Keep your head still.","Good. Hold the ring in the center and breathe.","Locked in. Stay with it."];
+const COACH0="Tap Calibrate so your eyes can steer the ring.";
 let ci=0,view='focus',coachTier=0;
 
 /* ---------- kaleidoscope ----------
@@ -195,30 +205,41 @@ const canvas=$('#k'),ctx=canvas.getContext('2d');
 const K={t:0,w:1,h:1,
   cur:{fidx:2,alpha:.5,tempo:.3,sat:.2,alert:0,scale:1,glyph:0},
   tgt:{fidx:2,alpha:.5,tempo:.3,sat:.2,alert:0,scale:1,glyph:0}};
-let F=0.3,Ftgt=0.3;        // focus score, 0 to 1, eased toward its target
+let F=0.3,Ftgt=0.3,calmV=0.3,closeV=0;        // focus score, 0 to 1, eased toward its target
 function fit(){const d=Math.min(2,devicePixelRatio||1);K.w=innerWidth;K.h=innerHeight;canvas.width=K.w*d;canvas.height=K.h*d;ctx.setTransform(d,0,0,d,0,0);ctx.fillStyle='#090A22';ctx.fillRect(0,0,K.w,K.h);}
 addEventListener('resize',fit);fit();
 const center=()=>({x:K.w/2,y:K.h*0.4});
 
+// colour climbs with focus: deep ocean purple, then teal, then luminous. Orange is kept for alerts.
+const STOPS=[[0,[58,44,150]],[0.5,[47,227,200]],[1,[214,255,247]]];
+function tone(v){
+  v=clamp(v,0,1);for(let k=1;k<STOPS.length;k++){if(v<=STOPS[k][0]){const a=STOPS[k-1],b=STOPS[k],t=(v-a[0])/(b[0]-a[0]);return mix(a[1],b[1],t);}}
+  return STOPS[STOPS.length-1][1];
+}
 function layer(folds,wgt,R,P){
-  const t=K.t,half=Math.PI/folds,sc=P.scatter;
+  const t=K.t,half=Math.PI/folds,sc=P.scatter,D=P.detail;
   for(let i=0;i<folds;i++){
     ctx.save();
-    ctx.rotate(t*0.05+i*2*Math.PI/folds+sc*0.22*Math.sin(t*0.21+i*1.9));
+    ctx.rotate(t*0.05+i*2*Math.PI/folds+sc*0.3*Math.sin(t*0.21+i*1.9));
     if(i%2)ctx.scale(1,-1);
-    for(let L=0;L<8;L++){
+    for(let L=0;L<10;L++){
       const vis=clamp(P.layers-L,0,1);if(vis<0.01)break;
       const n1=Math.sin(t*0.37+L*2.3+i*1.7),n2=Math.sin(t*0.43+L*1.1+i*2.9);
-      const f=(L+1)/8.5*(1+sc*0.28*n1);
+      const f=(L+1)/(P.layers+0.8)*(1+sc*0.32*n1);
       const r=R*f*P.compact;
-      const a=half*(0.5+0.42*Math.sin(t*0.55+L*1.7))+sc*0.6*half*n2;
+      const a=half*(0.5+0.42*Math.sin(t*0.55+L*1.7))+sc*0.7*half*n2;
       const x=Math.cos(a)*r,y=Math.sin(a)*r;
-      const s=R*(0.032+0.026*(0.5+0.5*Math.sin(t*0.9+L*2.1)))*(1+sc*0.45*n2);
-      const col=L%2?P.sig:P.vio,fade=P.A*wgt*vis*(0.88-f*0.42);
-      ctx.strokeStyle=rgba(col,fade*0.85);ctx.beginPath();ctx.ellipse(x,y,s*lerp(1.6,2.3,1-sc),s*lerp(1.1,0.68,1-sc),a+t*0.25*(L%2?1:-1),0,Math.PI*2);ctx.stroke();
+      const s=R*(0.026+0.022*(0.5+0.5*Math.sin(t*0.9+L*2.1)))*(1+sc*0.5*n2)*lerp(1.25,0.85,D);
+      const col=L%2?P.sig:P.vio,fade=P.A*wgt*vis*(0.9-f*0.4);
+      ctx.strokeStyle=rgba(col,fade*0.85);ctx.beginPath();ctx.ellipse(x,y,s*lerp(1.5,2.4,1-sc),s*lerp(1.15,0.62,1-sc),a+t*0.25*(L%2?1:-1),0,Math.PI*2);ctx.stroke();
       ctx.strokeStyle=rgba(L%3===0?mix(col,PAL.alert,P.alert):col,fade*0.5);ctx.beginPath();ctx.arc(x*0.72,y*0.72,s*1.5,0,Math.PI*2);ctx.stroke();
       const a0=t*0.4*(L%2?-1:1)+L;ctx.strokeStyle=rgba(col,fade*0.7);ctx.beginPath();ctx.arc(x*0.72,y*0.72,s*2.3,a0,a0+Math.PI*0.7);ctx.stroke();
-      ctx.fillStyle=rgba(col,fade*0.7);ctx.beginPath();ctx.arc(x*1.08,y*1.08,s*0.28,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=rgba(col,fade*0.75);ctx.beginPath();ctx.arc(x*1.08,y*1.08,s*0.28,0,Math.PI*2);ctx.fill();
+      if(D>0.03){ // fine detail appears as focus holds: satellite beads and a small petal pair
+        ctx.fillStyle=rgba(P.hi,fade*D*0.8);
+        for(let q=0;q<2;q++){const qa=a0*0.6+q*Math.PI;ctx.beginPath();ctx.arc(x+Math.cos(qa)*s*1.9,y+Math.sin(qa)*s*1.9,s*0.16,0,Math.PI*2);ctx.fill();}
+        ctx.strokeStyle=rgba(P.hi,fade*D*0.6);ctx.beginPath();ctx.ellipse(x*0.86,y*0.86,s*0.9,s*0.3,a,0,Math.PI*2);ctx.stroke();
+      }
     }
     ctx.strokeStyle=rgba(P.vio,P.A*wgt*0.14*(1-sc*0.7));ctx.beginPath();ctx.moveTo(R*0.12,0);ctx.lineTo(R*P.compact,0);ctx.stroke();
     ctx.restore();
@@ -228,34 +249,56 @@ function draw(dt){
   const c=K.cur,g=K.tgt,e=Math.min(1,dt*1.4);
   if(view==='focus')g.fidx=F*(FOLDS.length-1);
   for(const k in g)c[k]+=(g[k]-c[k])*e;
-  K.t+=dt*(reduce?0.2:1)*c.tempo*lerp(1.3,0.65,F);
+  K.t+=dt*(reduce?0.2:1)*c.tempo*lerp(1.3,0.6,F);
   const w=K.w,h=K.h,o=center();
-  ctx.globalCompositeOperation='source-over';ctx.fillStyle=rgba([9,10,34],reduce?0.5:0.13);ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='source-over';ctx.fillStyle=rgba([9,10,34],reduce?0.5:0.14);ctx.fillRect(0,0,w,h);
+  const grey=1-c.sat;   // paused or idle states wash the colour toward mist
   const P={
     scatter:1-F,
-    layers:3+5*F,
-    compact:lerp(1.12,0.94,F),
-    sig:mix(PAL.mist,PAL.signal,c.sat*lerp(0.35,1,F)),
-    vio:mix(PAL.mist,PAL.violet,c.sat*lerp(0.35,1,F)),
-    A:c.alpha*lerp(0.6,1,F),
+    layers:2+8*F,
+    detail:clamp((F-0.35)/0.45,0,1),
+    compact:lerp(1.15,0.93,F),
+    sig:mix(tone(F),PAL.mist,grey*0.8),
+    vio:mix(tone(Math.max(0,F-0.3)),PAL.mist,grey*0.8),
+    hi:mix(tone(Math.min(1,F+0.2)),PAL.mist,grey*0.8),
+    A:c.alpha*lerp(0.38,1,F),
     alert:c.alert
   };
-  const R=Math.min(w,h)*0.46*c.scale*lerp(0.8,1.14,F);
-  ctx.save();ctx.translate(o.x,o.y);ctx.globalCompositeOperation='lighter';ctx.lineWidth=Math.max(0.8,R/180);
+  const R=Math.min(w,h)*0.46*c.scale*lerp(0.78,1.16,F);
+  ctx.save();ctx.translate(o.x,o.y);ctx.globalCompositeOperation='lighter';ctx.lineWidth=Math.max(0.8,R/lerp(170,240,F));
   const fi=clamp(c.fidx,0,FOLDS.length-1),i0=Math.floor(fi),wt=fi-i0,i1=Math.min(FOLDS.length-1,i0+1);
   if(wt<0.02||i0===i1)layer(FOLDS[i0],1,R,P);
   else if(wt>0.98)layer(FOLDS[i1],1,R,P);
   else{layer(FOLDS[i0],1-wt,R,P);layer(FOLDS[i1],wt,R,P);}
+  const folds=FOLDS[Math.round(fi)];
+  // inner rosette of petals, fades in with focus
+  if(P.detail>0.03){
+    const n=folds*2,pr=R*0.3;ctx.strokeStyle=rgba(P.hi,P.A*P.detail*0.55);
+    for(let k=0;k<n;k++){const th=k*2*Math.PI/n-K.t*0.08;ctx.beginPath();ctx.ellipse(Math.cos(th)*pr*0.55,Math.sin(th)*pr*0.55,pr*0.5,pr*0.14,th,0,Math.PI*2);ctx.stroke();}
+  }
+  // outer lace ring at high focus
+  const lace=clamp((F-0.6)/0.3,0,1);
+  if(lace>0.03){
+    const n=folds*3,lr=R*1.02*P.compact;ctx.strokeStyle=rgba(P.hi,P.A*lace*0.6);
+    for(let k=0;k<n;k++){const th=k*2*Math.PI/n+K.t*0.05;ctx.beginPath();ctx.arc(Math.cos(th)*lr,Math.sin(th)*lr,R*0.035,th+Math.PI*0.5,th+Math.PI*1.5);ctx.stroke();}
+  }
   ctx.strokeStyle=rgba(c.alert>0.5?PAL.alert:P.sig,P.A*(0.12+0.18*F)+c.alert*0.4);ctx.beginPath();ctx.arc(0,0,R*1.02*P.compact,0,Math.PI*2);ctx.stroke();
   const gA=c.glyph*(view==='focus'?clamp((F-0.4)/0.3,0,1):1);
   if(gA>0.02){
-    const folds=FOLDS[Math.round(fi)],p=0.5+0.5*Math.sin(K.t*1.6),gR=R*(0.12+0.03*p);
+    const p=0.5+0.5*Math.sin(K.t*1.6),gR=R*(0.12+0.03*p);
     ctx.strokeStyle=rgba(P.sig,gA*P.A*(0.65+0.35*p));ctx.lineWidth=Math.max(1.2,R/110);ctx.beginPath();
     for(let v=0;v<=folds;v++){const th=-Math.PI/2+v*2*Math.PI/folds+K.t*0.12;v?ctx.lineTo(Math.cos(th)*gR,Math.sin(th)*gR):ctx.moveTo(Math.cos(th)*gR,Math.sin(th)*gR);}
     ctx.stroke();
   }
   ctx.fillStyle=rgba(PAL.alert,P.A*lerp(0.35,0.95,F));ctx.beginPath();ctx.arc(0,0,R*0.02*(1+0.4*Math.sin(K.t*1.6)),0,Math.PI*2);ctx.fill();
   ctx.restore();
+  // centre target with a focus meter around it, so it is clear where to hold the ring and how far along you are
+  if(running&&view==='focus'&&mode==='reading'){
+    const zr=Math.min(w,h)*0.1;ctx.save();ctx.translate(o.x,o.y);ctx.globalCompositeOperation='source-over';
+    ctx.lineWidth=2;ctx.strokeStyle=rgba(PAL.mist,0.22);ctx.beginPath();ctx.arc(0,0,zr,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=4;ctx.lineCap='round';ctx.strokeStyle=rgba(tone(F),0.9);ctx.beginPath();ctx.arc(0,0,zr,-Math.PI/2,-Math.PI/2+Math.max(0.001,F)*Math.PI*2);ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /* ---------- states ---------- */
@@ -282,7 +325,7 @@ function setView(v){
   $('#v-focus').setAttribute('aria-pressed',v==='focus');$('#v-read').setAttribute('aria-pressed',v==='read');
   $('#b-third').textContent=v==='focus'?'Re-center':'Next';
   if(v==='read'){const c=CONCEPTS[ci];$('#cap-k').textContent=c.k;$('#cap-p').textContent=c.p;K.tgt.fidx=FOLDS.indexOf(c.folds);}
-  else{$('#cap-k').textContent='Focus';$('#cap-p').textContent=COACH[coachTier];}
+  else{$('#cap-k').textContent='Focus';$('#cap-p').textContent=calib?COACH[coachTier]:COACH0;}
   label();
 }
 $('#v-focus').onclick=()=>setView('focus');
@@ -302,7 +345,7 @@ async function start(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='This browser cannot open the camera. Open the page in Safari.';msg.className='small err';return;}
   b.disabled=true;b.textContent='Opening camera';
   try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
   }catch(e){
     b.disabled=false;b.textContent='Try again';
     msg.textContent=e&&e.name==='NotAllowedError'?'Camera access was declined. In Safari, tap aA in the address bar, open Website Settings, set Camera to Allow, then try again.':'The camera could not start ('+(e&&e.name||'error')+').';
@@ -350,10 +393,13 @@ let calib=null,off={x:0,y:0},recenterJob=null;
 const fx1=new OneEuro(),fy1=new OneEuro(),medX=[],medY=[];
 let gazeP=null;
 const eyeH=[],headH=[],lookH=[];
-let eFloor=0.02;
+let eFloor=0.02,lock=0,dbgOn=false,dEx=0,dEy=0;
 
-function eyeFeat(P,c1,c2,ir){
-  const a=P(c1),b=P(c2),p=P(ir),vx=b.x-a.x,vy=b.y-a.y,L2=vx*vx+vy*vy||1,qx=p.x-a.x,qy=p.y-a.y;
+// Iris centre (mean of the iris ring) measured inside the eye: along the corner-to-corner line,
+// and across it, both divided by eye width. Head position cancels out; only eye rotation moves it.
+function eyeFeat(P,c1,c2,ring){
+  const a=P(c1),b=P(c2);let px=0,py=0;for(const i of ring){const q=P(i);px+=q.x;py+=q.y;}px/=ring.length;py/=ring.length;
+  const vx=b.x-a.x,vy=b.y-a.y,L2=vx*vx+vy*vy||1,qx=px-a.x,qy=py-a.y;
   return {u:(qx*vx+qy*vy)/L2-0.5,v:(qy*vx-qx*vy)/L2};
 }
 function trim(arr,now,ms){while(arr.length&&now-arr[0].t>ms)arr.shift();}
@@ -373,7 +419,7 @@ function analyze(res,now,dt){
   if(faces.length===0){secondT=0;cur=null;lookH.push({t:now,v:0});trim(lookH,now,5000);if(now-seenAt>700)setMode('noface');return;}
   seenAt=now;
   if(faces.length>=2){secondT+=dt;if(secondT>0.4){setMode('second');cur=null;return;}}else secondT=0;
-  const lm=faces[0];if(lm.length<474)return;
+  const lm=faces[0];if(lm.length<478)return;
   const cats=(res.faceBlendshapes&&res.faceBlendshapes[0])?res.faceBlendshapes[0].categories:[];
   const W=video.videoWidth||640,H=video.videoHeight||480;
   const P=i=>({x:lm[i].x*W,y:lm[i].y*H,z:lm[i].z*W});
@@ -389,13 +435,18 @@ function analyze(res,now,dt){
   const pitchG=((lm[1].y-lm[10].y)/Math.max(1e-3,lm[152].y-lm[10].y))-0.55;
 
   // iris position inside each eye, measured along the line between the eye corners
-  const A=eyeFeat(P,33,133,468),B=eyeFeat(P,362,263,473);
+  const A=eyeFeat(P,33,133,[468,469,470,471,472]),B=eyeFeat(P,362,263,[473,474,475,476,477]);
   const ex=(A.u+B.u)/2,ey=(A.v+B.v)/2;
   const bx=(bs(cats,'eyeLookOutRight')+bs(cats,'eyeLookInLeft')-bs(cats,'eyeLookOutLeft')-bs(cats,'eyeLookInRight'))/2;
   const by=(bs(cats,'eyeLookDownLeft')+bs(cats,'eyeLookDownRight')-bs(cats,'eyeLookUpLeft')-bs(cats,'eyeLookUpRight'))/2;
   const blink=(bs(cats,'eyeBlinkLeft')+bs(cats,'eyeBlinkRight'))/2;
   const blinking=blink>0.45;
   cur={t:now,f:[ex,ey,bx,by,nx,ny,hx,hy],blink:blinking};
+  if(dbgOn){
+    dEx+=(ex-dEx)*0.4;dEy+=(ey-dEy)*0.4;
+    $('#dbg-dot').style.transform=`translate(${clamp(dEx*420,-42,42).toFixed(1)}px,${clamp(dEy*420,-24,24).toFixed(1)}px)`;
+    $('#dbg-t').textContent=`eye x ${dEx>=0?'+':''}${dEx.toFixed(3)}\neye y ${dEy>=0?'+':''}${dEy.toFixed(3)}\nhead ${nx>=0?'+':''}${nx.toFixed(2)} ${ny>=0?'+':''}${ny.toFixed(2)}`;
+  }
 
   // blinks: rising edge above 0.5, reset below 0.3
   if(!blinkOn&&blink>0.5){blinkOn=true;blinks.push(now);}
@@ -425,8 +476,7 @@ function analyze(res,now,dt){
   const s3=lookH.reduce((s,o)=>s+o.v,0)/Math.max(1,lookH.length);
   const recent=blinks.filter(b=>now-b<20000).length*3;
   const s4=(now-startedAt)<10000?1:clamp(1-(recent-22)/20,0,1);
-  let Ft=clamp((0.45*s1+0.25*s2+0.2*s3+0.1*s4-0.3)/0.6,0,1);
-  Ftgt=Ft;
+  calmV=clamp((0.45*s1+0.25*s2+0.2*s3+0.1*s4-0.3)/0.6,0,1);
 
   if(mode==='reading'&&view==='read'){dwellT+=dt;if(dwellT>12){dwellT=0;next();}}
 
@@ -439,6 +489,13 @@ function analyze(res,now,dt){
     const minCut=lerp(1.0,0.18,F),beta=lerp(0.006,0.003,F);
     gazeP={x:clamp(fx1.f(mx,ddt,minCut,beta),14,innerWidth-14),y:clamp(fy1.f(my,ddt,minCut,beta),14,innerHeight-14)};
   }
+  // holding the ring on the center target builds "lock"; drifting off lets it fall away
+  if(calib&&gazeP){
+    const c=center(),d=Math.hypot(gazeP.x-c.x,gazeP.y-c.y)/(Math.min(innerWidth,innerHeight)*0.5);
+    closeV=clamp(1-d/0.42,0,1);
+    lock=clamp(lock+(closeV>0.45?dt/3*closeV:-dt/2.2),0,1);
+    Ftgt=0.62*lock*(0.55+0.45*closeV)+0.38*calmV;
+  }else Ftgt=calmV;
 }
 
 /* gaze ring: follows the gaze once calibrated, tightens as focus rises */
@@ -467,14 +524,22 @@ function recenter(tx,ty){
 }
 $('#b-third').onclick=()=>{if(view==='read'){next();return;}const c=center();toast('Look at the center',650);recenter(c.x,c.y);};
 canvas.addEventListener('pointerdown',e=>{if(running&&calib&&!calibrating)recenter(e.clientX,e.clientY);});
-$('#b-cam').onclick=()=>{const on=!$('#thumb').classList.contains('show');$('#thumb').classList.toggle('show',on);$('#b-cam').setAttribute('aria-pressed',on);};
+$('#b-cam').onclick=()=>{const on=!$('#thumb').classList.contains('show');dbgOn=on;$('#thumb').classList.toggle('show',on);$('#dbg').classList.toggle('show',on);$('#b-cam').setAttribute('aria-pressed',on);};
 
 /* ---------- calibration: nine points plus a head-movement pass, ridge regression ---------- */
 let calibrating=false;
-function predict(f){
-  const z=[1];for(const j of calib.keep)z.push((f[j]-calib.mu[j])/calib.sd[j]);
-  let x=0,y=0;for(let i=0;i<z.length;i++){x+=calib.wx[i]*z[i];y+=calib.wy[i]*z[i];}
+// Eyes drive the ring: stage one maps eye-in-socket features to the screen.
+// Stage two only corrects for head turns, learned while the eyes hold one dot.
+const EYE=[0,1,2,3],HEAD=[4,5,6,7];
+function applyRidge(m,f){
+  const z=m.bias?[1]:[];for(const j of m.keep)z.push((f[j]-m.mu[j])/m.sd[j]);
+  let x=0,y=0;for(let i=0;i<z.length;i++){x+=m.wx[i]*z[i];y+=m.wy[i]*z[i];}
   return {x,y};
+}
+function predict(f){
+  const e=applyRidge(calib.eye,f);
+  if(calib.head){const h=applyRidge(calib.head,f);e.x+=h.x;e.y+=h.y;}
+  return e;
 }
 function solve(A,b){
   const n=b.length,M=A.map((r,i)=>[...r,b[i]]);
@@ -486,18 +551,23 @@ function solve(A,b){
   }
   return M.map((r,i)=>r[n]/r[i]);
 }
-function fitModel(rows){
-  const m=rows[0].f.length,n=rows.length,mu=[],sd=[],keep=[];
-  for(let j=0;j<m;j++){let s=0;for(const r of rows)s+=r.f[j];mu[j]=s/n;let v=0;for(const r of rows)v+=(r.f[j]-mu[j])**2;sd[j]=Math.sqrt(v/n);if(sd[j]>1e-5)keep.push(j);}
-  const k=keep.length+1,A=Array.from({length:k},()=>new Array(k).fill(0)),bx=new Array(k).fill(0),by=new Array(k).fill(0);
+function fitRidge(rows,idx,lamK,bias,muIn){
+  const n=rows.length,mu=[],sd=[],keep=[];
+  for(const j of idx){
+    let s=0;for(const r of rows)s+=r.f[j];const m=s/n;
+    let v=0;for(const r of rows)v+=(r.f[j]-m)**2;
+    mu[j]=muIn?muIn[j]:m;sd[j]=Math.sqrt(v/n);if(sd[j]>1e-6)keep.push(j);
+  }
+  const off=bias?1:0,k=keep.length+off;if(!k)return null;
+  const A=Array.from({length:k},()=>new Array(k).fill(0)),bx=new Array(k).fill(0),by=new Array(k).fill(0);
   for(const r of rows){
-    const z=[1];for(const j of keep)z.push((r.f[j]-mu[j])/sd[j]);
+    const z=bias?[1]:[];for(const j of keep)z.push((r.f[j]-mu[j])/sd[j]);
     for(let a=0;a<k;a++){bx[a]+=z[a]*r.x;by[a]+=z[a]*r.y;for(let b=0;b<k;b++)A[a][b]+=z[a]*z[b];}
   }
-  const lam=0.03*n;for(let a=1;a<k;a++)A[a][a]+=lam;
+  for(let a=off;a<k;a++)A[a][a]+=lamK*n;
   const wx=solve(A,bx),wy=solve(A,by);
   if(!wx||!wy||wx.some(isNaN)||wy.some(isNaN))return null;
-  return {mu,sd,keep,wx,wy};
+  return {mu,sd,keep,wx,wy,bias};
 }
 async function collect(ms){
   const out=[],t0=performance.now();let lt=0;
@@ -520,7 +590,7 @@ $('#b-cal').onclick=async()=>{
   d.classList.remove('hold');d.style.left='50%';d.style.top='50%';await wait(1800);
   for(let i=0;i<pts.length;i++){
     const [px,py]=pts[i];
-    step.textContent=`Point ${i+1} of ${pts.length}`;hint.textContent='Look right at the dot.';
+    step.textContent=`Point ${i+1} of ${pts.length}`;hint.textContent='Head still. Move only your eyes to the dot.';
     d.classList.remove('hold');d.style.left=(px*100)+'%';d.style.top=(py*100)+'%';
     await wait(800);d.classList.add('hold');await wait(450);
     const s=bestOf(await collect(900),0.75);
@@ -532,19 +602,36 @@ $('#b-cal').onclick=async()=>{
   step.textContent='Last step';hint.textContent='Keep your eyes on the dot and slowly move your head a little: left, right, up and down.';
   await wait(1000);d.classList.add('hold');
   const hs=await collect(4500);
-  for(let i=0;i<hs.length;i+=Math.max(1,Math.floor(hs.length/70)))rows.push({f:hs[i],x:innerWidth/2,y:innerHeight/2});
   d.classList.remove('hold');
-  const model=perPoint.length>=6?fitModel(rows):null;
+  const eye=perPoint.length>=6?fitRidge(rows,EYE,0.01,true):null;
+  let model=null;
+  if(eye){
+    model={eye,head:null};
+    // head correction: with the eyes held on the centre dot, whatever the eye model reads is error caused by the head
+    const mu9=[];for(const j of HEAD){let s2=0;for(const r of rows)s2+=r.f[j];mu9[j]=s2/rows.length;}
+    const hr=[];for(let i=0;i<hs.length;i+=Math.max(1,Math.floor(hs.length/70))){const q=applyRidge(eye,hs[i]);hr.push({f:hs[i],x:innerWidth/2-q.x,y:innerHeight/2-q.y});}
+    if(hr.length>=20)model.head=fitRidge(hr,HEAD,0.15,false,mu9);
+  }
+  // how clearly did the eyes alone move between the left and right columns of dots?
+  let sep=0,noise=0;
+  if(perPoint.length>=6){
+    const mean=(a,k)=>a.reduce((t,v)=>t+v[k],0)/a.length;
+    const L=perPoint.filter(p=>p.tx<innerWidth*0.3),Rr=perPoint.filter(p=>p.tx>innerWidth*0.7);
+    if(L.length&&Rr.length)sep=Math.abs(mean(Rr.flatMap(p=>p.s),0)-mean(L.flatMap(p=>p.s),0));
+    let nv=0,nn=0;for(const p of perPoint){const m=mean(p.s,0);for(const f of p.s){nv+=(f[0]-m)**2;nn++;}}noise=Math.sqrt(nv/Math.max(1,nn));
+  }
   if(!model){
     step.textContent='Try again';hint.textContent='Your eyes were hard to see. Try brighter, even light on your face and hold the phone steady.';
     await wait(2600);C.hidden=true;calibrating=false;return;
   }
-  calib=model;off={x:0,y:0};fx1.reset();fy1.reset();medX.length=0;medY.length=0;gazeP=null;
+  calib=model;calib.sep=sep;calib.noise=noise;off={x:0,y:0};lock=0;fx1.reset();fy1.reset();medX.length=0;medY.length=0;gazeP=null;
   let err=0;for(const p of perPoint){let mx=0,my=0;for(const f of p.s){const q=predict(f);mx+=q.x;my+=q.y;}mx/=p.s.length;my/=p.s.length;err+=(mx-p.tx)**2+(my-p.ty)**2;}
   err=Math.sqrt(err/perPoint.length)/Math.min(innerWidth,innerHeight);
-  const grade=err<0.09?'Good':err<0.16?'Fair':'Rough';
+  const weakEyes=sep<noise*3;
+  const grade=weakEyes?'Rough':err<0.09?'Good':err<0.16?'Fair':'Rough';
   step.textContent=`Calibration: ${grade}`;
-  hint.textContent=grade==='Rough'?'Usable, but try again with brighter light and the phone held still.':'Tap anywhere you are looking to fine-tune the ring.';
+  hint.textContent=weakEyes?'Your eye movement was hard to read. Try brighter light on your face, hold the phone a little closer, and keep your head still.':grade==='Rough'?'Usable, but try again with brighter light and the phone held still.':'Rest your eyes on the center target. Tap anywhere you are looking to fine-tune.';
+  if(view==='focus')$('#cap-p').textContent=COACH[coachTier];
   await wait(2200);
   C.hidden=true;calibrating=false;$('#b-cal').textContent='Recalibrate';
 };
@@ -554,7 +641,7 @@ let last=performance.now(),lastA=performance.now();
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;
   const ft=!running?0.3:mode==='reading'?Ftgt:0.08;
-  F+=(ft-F)*(1-Math.exp(-dt/(ft>F?2.2:1.1)));
+  F+=(ft-F)*(1-Math.exp(-dt/(ft>F?1.5:1.0)));
   draw(dt);
   if(running&&landmarker&&video.readyState>=2&&video.currentTime!==lastVT){
     lastVT=video.currentTime;
@@ -566,12 +653,13 @@ function frame(now){
   if(view==='focus'){
     $('#bar').style.width=(F*100).toFixed(1)+'%';
     const tier=F>(coachTier===2?0.68:0.76)?2:F>(coachTier>=1?0.36:0.44)?1:0;
-    if(tier!==coachTier){coachTier=tier;$('#cap-p').textContent=COACH[tier];}
+    if(tier!==coachTier){coachTier=tier;if(calib)$('#cap-p').textContent=COACH[tier];}
   }else $('#bar').style.width=Math.min(100,dwellT/12*100)+'%';
   fpsT+=dt;if(fpsT>=1){$('#t-fps').textContent=fpsN;fpsN=0;fpsT=0;}
   requestAnimationFrame(frame);
 }
 Object.assign(K.tgt,STATES.idle.k);setView('focus');
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
 requestAnimationFrame(frame);
 </script>
 </body>
