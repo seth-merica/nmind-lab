@@ -55,12 +55,12 @@ A SwiftUI version of Nmind that tracks your face with ARKit on the Face ID (True
 - Tracking in the dark. The Face ID camera projects its own infrared dots, so face, eye and expression tracking keep working with the lights off.
 - Steadier eye direction from ARKit's eye transforms and look-at point.
 - More precise expression scores: all 52 of ARKit's face scores (blinks, squint, wide eyes, brow, jaw, mouth) from a depth map instead of a flat picture.
-- Breathing from head motion measured in millimetres.
+- Breathing from head motion measured in millimeters.
 
 **What it still can't do**
 
 - Pupil size. iOS does not give apps the raw infrared image, only the finished face model, so pupils can't be measured here either.
-- The pulse still comes from skin colour on the front colour camera. It is a hint and needs light on your face.
+- The pulse still comes from skin color on the front color camera. It is a hint and needs light on your face.
 
 Everything runs on the phone. No frames, images or numbers are saved or sent.
 
