@@ -25,6 +25,9 @@ struct Live {
     /// heart rate from the camera, and how sure the reading is (0 to 1)
     var hr = 0.0
     var hrConf = 0.0
+    /// where the centre target sits now, as a fraction of the screen's width and height
+    var tx = 0.5
+    var ty = Engine.homeY
 }
 
 /// What the readout and captions show, refreshed four times a second.
@@ -79,6 +82,18 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var hrStart = 0.0
     private var boostUntil = 0.0
 
+    // The wandering target. It drifts slowly around the screen once the resting face is learned,
+    // and the tunnel bends to follow it. The gaze is compared with where the target is now, and
+    // `gazeMap` learns how far the eyes move on the screen for each metre the target moves, so it
+    // works whatever the gaze sensor's gain or the phone's axes turn out to be.
+    static let homeY = 0.42
+    private static let metresPerPoint = 0.000166                  // iPhone 17 Pro Max, about 460 ppi at 3x
+    private let screenM = (w: 440 * Engine.metresPerPoint, h: 956 * Engine.metresPerPoint)
+    private var wanderPhase = 0.0, wanderAmp = 0.0
+    private var tx = 0.5, ty = Engine.homeY
+    /// screen offset (right, down) in metres to gaze-hit offset in camera space: [a b; c d]
+    private var gazeMap = (a: 0.0, b: 1.0, c: 1.0, d: 0.0)
+
     override init() {
         super.init()
         session.delegate = self
@@ -96,7 +111,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = (0, 1, 1, 0); self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -208,6 +223,18 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         }
         if blink < 0.4, let h = hit { lastHit = h }
 
+        // move the target, then take the gaze relative to it
+        let learning = calm.out.learning
+        if mode == .reading && !learning { wanderPhase += dt }
+        wanderAmp += ((mode == .reading && !learning ? 1.0 : 0.0) - wanderAmp) * min(1, dt / 6)
+        let w = wanderPhase * 2 * Double.pi
+        tx = 0.5 + wanderAmp * (0.22 * sin(w / 27) + 0.06 * sin(w / 71 + 2.1))
+        ty = Engine.homeY + wanderAmp * (0.09 * sin(w / 37 + 1.3) + 0.02 * sin(w / 53))
+        let ox = (tx - 0.5) * screenM.w, oy = (ty - Engine.homeY) * screenM.h
+        let gm = gazeMap
+        let expect = SIMD2(gm.a * ox + gm.b * oy, gm.c * ox + gm.d * oy)
+        let res: SIMD2<Double>? = hit.map { $0 - expect }
+
         // phone movement from the motion sensors: quick moves of the hand are not the body
         // getting restless, so head stillness is held, not marked down, while the phone moves
         var moveNow = 0.0
@@ -229,7 +256,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         lookH.append((t, looking)); trimLook(t)
 
         // steadiness of the gaze on the screen and of the head over the last couple of seconds
-        if blink < 0.4, let h = hit { eyeH.append((t, h.x, h.y)) }
+        if blink < 0.4, let h = res { eyeH.append((t, h.x, h.y)) }
         eyeH.removeAll { t - $0.t > 1.5 }
         let gazeSpread = eyeSpread() / eyeDist                      // radians, as seen from the eyes
         let s1 = exp(-max(0, gazeSpread - 0.012) / 0.03)
@@ -246,7 +273,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         // centre lock: the gaze stays on the same spot of the screen. A steady gaze held on
         // another spot for a couple of seconds pulls the centre there, so a bad start or a
         // shifted grip recovers on its own; tapping the screen sets it at once.
-        if blink < 0.4 && looking, let h = hit {
+        if blink < 0.4 && looking, let h = res {
             if recenterAsked || center == nil { center = (h.x, h.y); recenterAsked = false }
             else if let cc = center {
                 let off = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
@@ -254,16 +281,25 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                 let tau = calm.out.learning ? 3.0 : (steady && off > 0.06 ? 2.5 : 25.0)
                 let k = 1 - exp(-dt / tau)
                 center = (cc.x + (h.x - cc.x) * k, cc.y + (h.y - cc.y) * k)
+                // learn the gaze map while the target is away from home and the eyes follow it
+                let on = ox * ox + oy * oy
+                if on > 0.004 * 0.004 && !phoneMoving && gazeSpread < 0.05, let raw = hit {
+                    let eX = raw.x - cc.x - expect.x, eY = raw.y - cc.y - expect.y
+                    let g = 0.004 / (on + 0.01 * 0.01)
+                    func c1(_ v: Double) -> Double { max(-1.6, min(1.6, v)) }
+                    gazeMap = (c1(gm.a + g * eX * ox), c1(gm.b + g * eX * oy), c1(gm.c + g * eY * ox), c1(gm.d + g * eY * oy))
+                }
             }
         }
-        if let cc = center, let h = lastHit {
+        if let cc = center, let raw = lastHit {
+            let h = raw - expect
             let dev = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
             let target = looking ? exp(-max(0, dev - 0.05) / 0.12) : 0
             lock += (target - lock) * (1 - exp(-dt / 0.4))
         }
         // eye jumps are read from the gaze on the screen, so following the screen as the hand
         // moves does not count as restless eyes
-        let gx = lastHit.map { $0.x / eyeDist } ?? ex, gy = lastHit.map { $0.y / eyeDist } ?? ey
+        let gx = lastHit.map { ($0.x - expect.x) / eyeDist } ?? ex, gy = lastHit.map { ($0.y - expect.y) / eyeDist } ?? ey
 
         // skin colour on forehead and cheeks, for the camera pulse (a hint)
         let rgb = sampleSkin(a, frame: frame)
@@ -312,7 +348,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private func publish(_ t: Double) {
         let o = calm.out
         let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft,
-                        hr: o.hr, hrConf: o.hrConf)
+                        hr: o.hr, hrConf: o.hrConf, tx: tx, ty: ty)
         var p: Panel?
         if o.hrConf > 0.15 && o.hr > 35 && o.hr < 180 {
             if hrStart == 0 { hrStart = o.hr }

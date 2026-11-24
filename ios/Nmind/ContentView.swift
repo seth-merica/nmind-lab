@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.12"
+    static let version = "0.13"
 }
 
 enum Palette {
@@ -23,7 +23,6 @@ final class DrawState {
     let field = VoidField()
     private var last: Date?
     private var alpha = 0.85, sat = 0.8
-    static let centerY = 0.42
 
     /// Advances one frame and returns the shader inputs for it.
     func frame(date: Date, engine: Engine, reduce: Bool) -> VoidUniforms {
@@ -55,7 +54,8 @@ final class DrawState {
         let live = engine.live
         guard engine.running && live.mode == .reading else { return }
         let F = live.F
-        let c = CGPoint(x: size.width / 2, y: size.height * DrawState.centerY)
+        // the target sits on the far end of the tunnel and wanders with it
+        let c = CGPoint(x: size.width * live.tx, y: size.height * live.ty)
         let zr = min(size.width, size.height) * 0.1
         let ring = Path(ellipseIn: CGRect(x: c.x - zr, y: c.y - zr, width: zr * 2, height: zr * 2))
         ctx.stroke(ring, with: .color(Palette.foam.opacity(0.18)), lineWidth: 2)
@@ -82,7 +82,7 @@ struct ContentView: View {
                     ZStack {
                         Rectangle()
                             .fill(Palette.bg)
-                            .colorEffect(u.shader(size: geo.size, centerY: DrawState.centerY))
+                            .colorEffect(u.shader(size: geo.size))
                         Canvas { ctx, size in
                             drawState.drawMeter(&ctx, size: size, engine: engine)
                         }
@@ -103,7 +103,7 @@ struct ContentView: View {
                 GeometryReader { g in
                     MessageBand(banner: journey.banner, panel: engine.panel, toast: toast)
                         .frame(width: g.size.width - 32)
-                        .position(x: g.size.width / 2, y: g.size.height * 0.63)
+                        .position(x: g.size.width / 2, y: g.size.height * 0.665)
                 }
                 .allowsHitTesting(false)
             } else {

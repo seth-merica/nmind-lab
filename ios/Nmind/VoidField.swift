@@ -5,6 +5,8 @@ struct VoidUniforms {
     var time = 0.0, flow = 0.0, focus = 0.3, deep = 0.0, beat = 0.0
     var folds = 7.0, hue = 0.0, iters = 1.0, wash = 0.2, bright = 0.85, kseed = 1.0
     var beatPhase = 0.0, ripple = 0.0, heartCalm = 0.0
+    /// the far end of the tunnel, as a fraction of the screen
+    var tx = 0.5, ty = Engine.homeY
 }
 
 /// Turns the engine's live readings into smooth shader inputs, frame by frame.
@@ -118,14 +120,17 @@ final class VoidField {
         u.wash = 1 - sat
         u.bright = alpha * (0.3 + 0.7 * swap) * (1 + 0.35 * bloomEnv)
         u.heartCalm = max(heartCalm, 0.8 * bloomEnv)
+        u.tx = running ? live.tx : 0.5
+        u.ty = running ? live.ty : Engine.homeY
         return u
     }
 }
 
 extension VoidUniforms {
-    func shader(size: CGSize, centerY: Double) -> Shader {
+    func shader(size: CGSize) -> Shader {
         ShaderLibrary.nmindVoid(
-            .float2(size.width, size.height), .float(centerY), .float(time), .float(flow),
+            .float2(size.width, size.height), .float2(0.5, Engine.homeY), .float2(tx, ty),
+            .float(time), .float(flow),
             .float(focus), .float(deep), .float(beat), .float(folds), .float(hue), .float(iters),
             .float(wash), .float(bright), .float(kseed),
             .float(beatPhase), .float(ripple), .float(heartCalm))
