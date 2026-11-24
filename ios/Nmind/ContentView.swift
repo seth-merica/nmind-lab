@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.17"
+    static let version = "0.18"
 }
 
 enum Palette {
@@ -25,7 +25,7 @@ final class DrawState {
     private var alpha = 0.85, sat = 0.8
 
     /// Advances one frame and returns the shader inputs for it.
-    func frame(date: Date, engine: Engine, reduce: Bool) -> VoidUniforms {
+    func frame(date: Date, engine: Engine, fade: Double, reduce: Bool) -> VoidUniforms {
         let dt = last.map { min(0.1, max(0.001, date.timeIntervalSince($0))) } ?? 1.0 / 60
         last = date
         let live = engine.live
@@ -44,7 +44,9 @@ final class DrawState {
             }
         }
         let e = min(1, dt * 1.4)
-        alpha += (target.0 - alpha) * e
+        // the end of a timed session dims the void with the sound
+        let dim = running ? 0.25 + 0.75 * fade : 1
+        alpha += (target.0 * dim - alpha) * e
         sat += (target.1 - sat) * e
         return field.update(date: date, live: live, running: running, alpha: alpha, sat: sat, reduce: reduce)
     }
@@ -77,13 +79,14 @@ struct ContentView: View {
     @State private var drawState = DrawState()
     @State private var showPanel = false
     @State private var toast = ""
+    @State private var soundOn = Soundscape.shared.enabled
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         ZStack {
             TimelineView(.animation) { tl in
                 GeometryReader { geo in
-                    let u = drawState.frame(date: tl.date, engine: engine, reduce: reduce)
+                    let u = drawState.frame(date: tl.date, engine: engine, fade: journey.fade, reduce: reduce)
                     ZStack {
                         Rectangle()
                             .fill(Palette.bg)
@@ -107,7 +110,8 @@ struct ContentView: View {
             }
 
             if engine.running {
-                RunningOverlay(engine: engine, panel: engine.panel, best: journey.record.deepest, showPanel: $showPanel)
+                RunningOverlay(engine: engine, panel: engine.panel, best: journey.record.deepest, clock: journey.clockText,
+                               showPanel: $showPanel, soundOn: $soundOn)
                 // every message sits in this band: below the centre target, above the stats
                 GeometryReader { g in
                     MessageBand(banner: journey.banner, panel: engine.panel, toast: toast)
@@ -115,13 +119,29 @@ struct ContentView: View {
                         .position(x: g.size.width / 2, y: g.size.height * 0.665)
                 }
                 .allowsHitTesting(false)
+            } else if let sum = journey.summary {
+                SummaryCard(summary: sum, record: journey.record) {
+                    withAnimation(.easeInOut(duration: 0.3)) { journey.summary = nil }
+                }
+                .transition(.opacity)
             } else {
-                IntroCard(engine: engine, record: journey.record, lastDive: journey.lastDive)
+                // the start card scrolls only if it doesn't fit the screen
+                ViewThatFits(in: .vertical) {
+                    IntroCard(engine: engine, journey: journey, soundOn: $soundOn)
+                    ScrollView(showsIndicators: false) {
+                        IntroCard(engine: engine, journey: journey, soundOn: $soundOn).padding(.vertical, 24)
+                    }
+                }
+                .transition(.opacity)
             }
         }
         .background(Palette.bg)
         .onReceive(ticker) { _ in
             journey.tick(dt: 0.25, engine: engine, field: drawState.field)
+        }
+        .onChange(of: engine.running) { _, _ in
+            // start and stop are handled at once, so the end card shows without a flicker of the start screen
+            journey.tick(dt: 0, engine: engine, field: drawState.field)
         }
     }
 
@@ -137,8 +157,10 @@ struct ContentView: View {
 
 struct IntroCard: View {
     @ObservedObject var engine: Engine
-    let record: Record
-    let lastDive: DiveSummary?
+    @ObservedObject var journey: Journey
+    @Binding var soundOn: Bool
+    private var record: Record { journey.record }
+    private var lastDive: DiveSummary? { journey.lastDive }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -157,8 +179,37 @@ struct IntroCard: View {
                 bullet("Rest your eyes on the center, soften your gaze, let your brow and jaw go.")
                 bullet("The first 20 seconds learn your resting face. Tap the screen to set the center right away.")
                 bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows. While you steer, tap a few spots you are looking at to tune it.")
+                bullet("Sound follows you: it fills out as you focus and shimmers when you're mellow. A timed session fades out and ends on a soft bell.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SESSION").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.mist)
+                HStack(spacing: 6) {
+                    ForEach(Journey.lengths, id: \.self) { m in
+                        let on = journey.plannedMinutes == m
+                        Button(action: { journey.plannedMinutes = m }) {
+                            Text(m == 0 ? "Open" : "\(m) min")
+                                .font(.footnote.weight(on ? .semibold : .regular))
+                                .foregroundStyle(on ? Palette.bg : Palette.foam)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                                .background(Capsule().fill(on ? Palette.teal : Palette.current.opacity(0.45)))
+                        }
+                    }
+                    Button(action: {
+                        soundOn.toggle()
+                        Soundscape.shared.setEnabled(soundOn)
+                    }) {
+                        Image(systemName: soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .font(.footnote)
+                            .foregroundStyle(soundOn ? Palette.teal : Palette.mist)
+                            .frame(width: 38).padding(.vertical, 8)
+                            .background(Capsule().fill(Palette.current.opacity(0.45)))
+                    }
+                    .accessibilityLabel(soundOn ? "Sound on" : "Sound off")
+                }
+            }
+            .padding(.top, 2)
             Button(action: { engine.start() }) {
                 Text("Start")
                     .font(.headline)
@@ -216,22 +267,126 @@ struct IntroCard: View {
     }
 }
 
+// MARK: end of a session
+
+struct SummaryCard: View {
+    let summary: SessionSummary
+    let record: Record
+    let done: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(summary.completed ? "SESSION COMPLETE" : "SESSION ENDED")
+                .font(.caption2.weight(.semibold)).tracking(1.2)
+                .foregroundStyle(summary.newBest ? Palette.amber : Palette.teal)
+            Text(headline)
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(Palette.foam)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(line)
+                .font(.subheadline).foregroundStyle(Palette.mist)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                tile(Journey.mmss(summary.seconds), "time")
+                tile("\(Int((summary.focus * 100).rounded()))%", "average focus")
+                tile(Journey.mmss(summary.mellowSeconds), "in mellow calm")
+                tile(Journey.mmss(summary.longestMellow), "calmest stretch")
+                tile("World \(summary.world + 1)", VoidWorld.name(summary.world).lowercased())
+                tile("\(summary.cleared)", summary.cleared == 1 ? "challenge cleared" : "challenges cleared")
+            }
+            if let a = summary.pulseStart, let b = summary.pulseEnd {
+                Text("Pulse hint \(a) → \(b)\(b < a ? ", settling as you went" : "")")
+                    .font(.footnote).foregroundStyle(Palette.mist)
+            }
+            HStack(spacing: 8) {
+                small(record.rank, "rank")
+                small("\(record.streak) day\(record.streak == 1 ? "" : "s")", "streak")
+                small("World \(record.deepest + 1)", "deepest")
+            }
+            Button(action: done) {
+                Text("Done")
+                    .font(.headline).foregroundStyle(Palette.bg)
+                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Palette.teal))
+            }
+            Text("Kept on this iPhone only. Pulse is a visual hint, not a health reading.")
+                .font(.caption).foregroundStyle(Palette.mist.opacity(0.8))
+        }
+        .padding(22)
+        .background(RoundedRectangle(cornerRadius: 22).fill(Palette.glass))
+        .overlay(RoundedRectangle(cornerRadius: 22)
+            .stroke(summary.newBest ? Palette.amber.opacity(0.6) : Palette.current, lineWidth: 1))
+        .padding(.horizontal, 18)
+    }
+
+    private var headline: String {
+        if summary.newBest { return "Deeper than ever" }
+        let share = summary.seconds > 0 ? summary.mellowSeconds / summary.seconds : 0
+        if share > 0.4 { return "A soft, deep dive" }
+        if summary.focus > 0.6 { return "Steady and focused" }
+        return "Time well spent"
+    }
+
+    private var line: String {
+        let world = "World \(summary.world + 1) · \(VoidWorld.name(summary.world))"
+        if summary.newBest { return "You reached \(world), your deepest yet." }
+        return "You reached \(world)."
+    }
+
+    private func tile(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.system(.title3, design: .monospaced).weight(.semibold))
+                .foregroundStyle(Palette.foam).lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.caption2).foregroundStyle(Palette.mist).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Palette.current.opacity(0.35)))
+    }
+
+    private func small(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.caption.weight(.semibold)).foregroundStyle(Palette.foam)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.caption2).foregroundStyle(Palette.mist)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Palette.current.opacity(0.35)))
+    }
+}
+
 // MARK: while running
 
 struct RunningOverlay: View {
     @ObservedObject var engine: Engine
     let panel: Panel
     let best: Int
+    let clock: String
     @Binding var showPanel: Bool
+    @Binding var soundOn: Bool
 
     var body: some View {
         VStack(spacing: 10) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Nmind").font(.headline).foregroundStyle(Palette.foam)
-                    Text("Prototype · v\(AppInfo.version)").font(.caption2).foregroundStyle(Palette.mist)
+                    Text("v\(AppInfo.version)\(clock.isEmpty ? "" : " · " + clock)")
+                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(Palette.mist)
                 }
                 Spacer()
+                Button(action: {
+                    soundOn.toggle()
+                    Soundscape.shared.setEnabled(soundOn)
+                }) {
+                    Image(systemName: soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                        .font(.footnote).foregroundStyle(soundOn ? Palette.teal : Palette.mist)
+                        .frame(width: 34, height: 30)
+                        .background(Capsule().fill(Palette.glass))
+                        .overlay(Capsule().stroke(Palette.current, lineWidth: 1))
+                }
+                .accessibilityLabel(soundOn ? "Sound on" : "Sound off")
                 pill(showPanel ? "Hide view" : "Camera view") { showPanel.toggle() }
                 pill("Stop") { engine.stop() }
             }

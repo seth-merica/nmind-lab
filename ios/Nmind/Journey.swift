@@ -35,6 +35,21 @@ struct DiveSummary {
     var newBest = false
 }
 
+/// The card shown when a session ends.
+struct SessionSummary {
+    var seconds = 0.0          // the whole session, start to finish
+    var planned = 0            // minutes chosen, 0 for open
+    var completed = false      // ran to the end of the chosen time
+    var focus = 0.0            // average focus while your face was in view, 0 to 1
+    var mellowSeconds = 0.0
+    var longestMellow = 0.0
+    var world = 0
+    var newBest = false
+    var cleared = 0
+    var pulseStart: Int?
+    var pulseEnd: Int?
+}
+
 /// One message in the band under the centre target.
 struct Banner: Equatable {
     enum Tone { case reward, challenge, info }
@@ -50,6 +65,22 @@ final class Journey: ObservableObject {
     @Published private(set) var banner: Banner?
     @Published private(set) var record: Record
     @Published private(set) var lastDive: DiveSummary?
+    @Published var summary: SessionSummary?
+    /// session length in minutes; 0 runs until you stop
+    @Published var plannedMinutes: Int {
+        didSet { UserDefaults.standard.set(plannedMinutes, forKey: Journey.minutesKey) }
+    }
+    /// seconds left in a timed session, or seconds so far in an open one
+    @Published private(set) var clockText = ""
+    /// 1 during a session, easing to 0 over its last 20 seconds
+    private(set) var fade = 1.0
+    static let lengths = [3, 5, 10, 20, 0]
+    private static let minutesKey = "nmind.minutes.v1"
+    private static let fadeLen = 20.0
+    static func mmss(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
 
     private enum Kind: CaseIterable { case center, still, soft, mellow, heart }
     private struct Active {
@@ -79,6 +110,9 @@ final class Journey: ObservableObject {
     private var clock = 0.0
     private var lastKind: Kind?
     private var wasSteering = false, steerCount = 0
+    private var elapsed = 0.0, focusSum = 0.0, mellowSeconds = 0.0, mellowRun = 0.0, longestMellow = 0.0
+    private var pulseStart: Int?, pulseEnd: Int?
+    private var finishedOnTime = false, fadeShown = false
 
     init() {
         if let d = UserDefaults.standard.data(forKey: Journey.key),
@@ -87,6 +121,8 @@ final class Journey: ObservableObject {
         } else {
             record = Record()
         }
+        let m = UserDefaults.standard.object(forKey: Journey.minutesKey) as? Int ?? 10
+        plannedMinutes = Journey.lengths.contains(m) ? m : 10
     }
 
     private func save() {
@@ -111,10 +147,51 @@ final class Journey: ObservableObject {
         let reading = p.mode == .reading
         if reading { sessionSeconds += dt }
 
+        // the session clock runs on real time; a timed session fades over its last 20 seconds and ends itself
+        elapsed += dt
+        let total = Double(plannedMinutes) * 60
+        if plannedMinutes > 0 {
+            let left = max(0, total - elapsed)
+            fade = min(1, left / Journey.fadeLen)
+            let secs = Int(left.rounded(.up))
+            clockText = String(format: "%d:%02d left", secs / 60, secs % 60)
+            if left <= Journey.fadeLen && !fadeShown {
+                fadeShown = true
+                active = nil
+                show(Banner(title: "Coming back", detail: "Let the light fade. Stay soft for these last breaths.", tone: .info), for: Journey.fadeLen + 2)
+            }
+            if left <= 0 {
+                finishedOnTime = true
+                engine.stop()
+                return
+            }
+        } else {
+            fade = 1
+            let secs = Int(elapsed)
+            clockText = String(format: "%d:%02d", secs / 60, secs % 60)
+        }
+        if reading {
+            focusSum += p.F * dt
+            if p.verdict == .mellow {
+                mellowSeconds += dt
+                mellowRun += dt
+                longestMellow = max(longestMellow, mellowRun)
+            } else {
+                mellowRun = 0
+            }
+            if let h = p.heart, sessionSeconds > 20 {
+                if pulseStart == nil { pulseStart = h }
+                pulseEnd = h
+            }
+        }
+        Soundscape.shared.update(focus: engine.live.F, mellow: p.mellow, deep: VoidWorld.deep(field.Z),
+                                 reading: reading, fade: fade)
+
         // a new world
         if p.depth > level {
             level = p.depth
             field.bloom()
+            Soundscape.shared.world(level)
             let name = "World \(level + 1) · \(VoidWorld.name(level))"
             if level > record.deepest {
                 let oldRank = record.rank
@@ -135,6 +212,7 @@ final class Journey: ObservableObject {
         let steering = engine.live.steering
         if steering && !wasSteering {
             steerCount += 1
+            Soundscape.shared.steer()
             if steerCount == 1 {
                 show(Banner(title: "You're steering", detail: "Look where you want to go. Tap a spot you're looking at to tune it.", tone: .info), for: 5)
             } else {
@@ -167,6 +245,7 @@ final class Journey: ObservableObject {
                 record.challengesWon += 1
                 save()
                 engine.boost(min(25, 10 + 2 * Double(tier)))
+                Soundscape.shared.cleared()
                 field.reward(seconds: min(40, 15 + 3 * Double(tier)))
                 show(Banner(title: "Calm \(tier) cleared", detail: "Speed surge and a rare color world. The next one asks for a little more.", tone: .reward), for: 5)
                 nextChallenge = sessionSeconds + Double.random(in: 25...40)
@@ -188,7 +267,9 @@ final class Journey: ObservableObject {
         }
 
         // start a challenge when the time comes and you're settled in
-        if reading && p.verdict != .learning && sessionSeconds >= nextChallenge && clock >= bannerUntil {
+        // no new challenge in the last minute and a quarter of a timed session
+        let roomLeft = plannedMinutes == 0 || total - elapsed > 75
+        if reading && roomLeft && p.verdict != .learning && sessionSeconds >= nextChallenge && clock >= bannerUntil {
             start(heartOK: p.heart != nil, drop: p.heartDrop)
         }
     }
@@ -250,6 +331,13 @@ final class Journey: ObservableObject {
         lastDive = nil
         wasSteering = false
         steerCount = 0
+        elapsed = 0; focusSum = 0; mellowSeconds = 0; mellowRun = 0; longestMellow = 0
+        pulseStart = nil; pulseEnd = nil
+        finishedOnTime = false; fadeShown = false
+        fade = 1
+        summary = nil
+        clockText = ""
+        Soundscape.shared.begin()
     }
 
     private func end() {
@@ -275,6 +363,14 @@ final class Journey: ObservableObject {
         if sessionSeconds >= 20 {
             lastDive = DiveSummary(minutes: Int((sessionSeconds / 60).rounded()), world: sessionBest,
                                    cleared: cleared, newBest: sessionBest > startDeepest)
+            summary = SessionSummary(seconds: elapsed, planned: plannedMinutes, completed: finishedOnTime,
+                                     focus: sessionSeconds > 0 ? focusSum / sessionSeconds : 0,
+                                     mellowSeconds: mellowSeconds, longestMellow: longestMellow,
+                                     world: sessionBest, newBest: sessionBest > startDeepest, cleared: cleared,
+                                     pulseStart: sessionSeconds >= 60 ? pulseStart : nil,
+                                     pulseEnd: sessionSeconds >= 60 ? pulseEnd : nil)
         }
+        fade = 1
+        Soundscape.shared.end()
     }
 }
