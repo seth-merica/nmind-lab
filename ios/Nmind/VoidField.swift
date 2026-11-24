@@ -26,6 +26,12 @@ final class VoidField {
     private var foldsNow = 7.0, foldsWant = 7.0, swap = 1.0
     private var hueNow = 0.0, seedNow = 1.0
     private var started = false
+    private var bloomAt = -100.0, rewardUntil = -100.0, rewardMix = 0.0
+
+    /// A slow swell of light when you cross into a new world: rises over half a second, fades over two.
+    func bloom() { bloomAt = u.time }
+    /// A rare color world for a while: the colors drift through the whole spectrum and the pattern gets richer.
+    func reward(seconds: Double) { rewardUntil = u.time + seconds }
 
     /// shader phase (0 to 1) for a hue in degrees, matching `pal()` in VoidShader.metal
     private static func phase(_ deg: Double) -> Double {
@@ -64,7 +70,9 @@ final class VoidField {
         if u.flow > 1000 { u.flow -= 1000 }
 
         // world look: hue takes the short way round, pattern seed morphs
-        var dh = w.hue - hueNow
+        rewardMix += ((u.time < rewardUntil ? 1.0 : 0.0) - rewardMix) * min(1, dt * 0.7)
+        let hueWant = rewardMix > 0.05 ? (u.time * 0.05).truncatingRemainder(dividingBy: 1) : w.hue
+        var dh = hueWant - hueNow
         dh -= (dh / 1).rounded()
         hueNow += dh * min(1, dt * 0.35)
         hueNow -= floor(hueNow)
@@ -104,9 +112,12 @@ final class VoidField {
         u.folds = foldsNow
         u.hue = hueNow
         u.kseed = seedNow
-        u.iters = 1 + 3 * F * (0.4 + 0.6 * deep)
+        let bt = u.time - bloomAt
+        let bloomEnv = bt < 0 || bt > 8 ? 0 : (bt < 0.5 ? (bt / 0.5) * (bt / 0.5) * (3 - 2 * bt / 0.5) : exp(-(bt - 0.5) / 1.2))
+        u.iters = min(4.2, 1 + 3 * F * (0.4 + 0.6 * deep) + 0.9 * rewardMix)
         u.wash = 1 - sat
-        u.bright = alpha * (0.3 + 0.7 * swap)
+        u.bright = alpha * (0.3 + 0.7 * swap) * (1 + 0.35 * bloomEnv)
+        u.heartCalm = max(heartCalm, 0.8 * bloomEnv)
         return u
     }
 }

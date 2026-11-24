@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.10"
+    static let version = "0.11"
 }
 
 enum Palette {
@@ -67,6 +67,8 @@ final class DrawState {
 
 struct ContentView: View {
     @StateObject private var engine = Engine()
+    @StateObject private var journey = Journey()
+    private let ticker = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
     @State private var drawState = DrawState()
     @State private var showPanel = false
     @State private var toast = ""
@@ -96,22 +98,22 @@ struct ContentView: View {
             }
 
             if engine.running {
-                RunningOverlay(engine: engine, panel: engine.panel, showPanel: $showPanel)
+                RunningOverlay(engine: engine, panel: engine.panel, best: journey.record.deepest, showPanel: $showPanel)
+                // every message sits in this band: below the centre target, above the stats
+                GeometryReader { g in
+                    MessageBand(banner: journey.banner, panel: engine.panel, toast: toast)
+                        .frame(width: g.size.width - 32)
+                        .position(x: g.size.width / 2, y: g.size.height * 0.63)
+                }
+                .allowsHitTesting(false)
             } else {
-                IntroCard(engine: engine)
-            }
-
-            if !toast.isEmpty {
-                Text(toast)
-                    .font(.footnote)
-                    .foregroundStyle(Palette.foam)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(Capsule().fill(Palette.glass))
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
+                IntroCard(engine: engine, record: journey.record, lastDive: journey.lastDive)
             }
         }
         .background(Palette.bg)
+        .onReceive(ticker) { _ in
+            journey.tick(dt: 0.25, engine: engine, field: drawState.field)
+        }
     }
 
     private func flash(_ text: String) {
@@ -126,6 +128,8 @@ struct ContentView: View {
 
 struct IntroCard: View {
     @ObservedObject var engine: Engine
+    let record: Record
+    let lastDive: DiveSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -159,7 +163,21 @@ struct IntroCard: View {
                     .foregroundStyle(Palette.alert)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Everything runs on this iPhone. Nothing is saved or sent.")
+            if record.sessions > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let d = lastDive {
+                        Text("Last dive: \(d.minutes) min · World \(d.world + 1) · \(d.cleared) challenge\(d.cleared == 1 ? "" : "s") cleared\(d.newBest ? " · new deepest" : "")")
+                            .font(.footnote.weight(.semibold)).foregroundStyle(Palette.teal)
+                    }
+                    HStack(spacing: 8) {
+                        progressStat(record.rank, "rank")
+                        progressStat("\(record.streak) day\(record.streak == 1 ? "" : "s")", "streak")
+                        progressStat("World \(record.deepest + 1)", "deepest")
+                        progressStat("\(record.challengesWon)", "cleared")
+                    }
+                }
+            }
+            Text("Everything runs on this iPhone. Your progress stays on it, and nothing is sent.")
                 .font(.caption)
                 .foregroundStyle(Palette.mist.opacity(0.8))
         }
@@ -167,6 +185,17 @@ struct IntroCard: View {
         .background(RoundedRectangle(cornerRadius: 22).fill(Palette.glass))
         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Palette.current, lineWidth: 1))
         .padding(.horizontal, 18)
+    }
+
+    private func progressStat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.caption.weight(.semibold)).foregroundStyle(Palette.foam)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.caption2).foregroundStyle(Palette.mist)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Palette.current.opacity(0.35)))
     }
 
     private func bullet(_ s: String) -> some View {
@@ -182,6 +211,7 @@ struct IntroCard: View {
 struct RunningOverlay: View {
     @ObservedObject var engine: Engine
     let panel: Panel
+    let best: Int
     @Binding var showPanel: Bool
 
     var body: some View {
@@ -209,18 +239,9 @@ struct RunningOverlay: View {
                 HStack(spacing: 8) {
                     stat("\(Int((panel.F * 100).rounded()))%", "focus")
                     stat(calmShort, "calm")
-                    stat("\(panel.depth + 1) · \(VoidWorld.name(panel.depth).components(separatedBy: " ").first ?? "")", "depth")
+                    stat("\(panel.depth + 1) · \(VoidWorld.name(panel.depth).components(separatedBy: " ").first ?? "")", "depth · best \(max(best, panel.depth) + 1)")
                     stat(panel.heart.map { panel.heartDrop >= 2 ? "\($0) ↓\(panel.heartDrop)" : "\($0)" } ?? "—", "heart")
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(caption.0).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(panel.verdict == .tense && panel.mode == .reading ? Palette.amber : Palette.teal)
-                    Text(caption.1).font(.footnote).foregroundStyle(Palette.mist)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Palette.glass))
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Palette.current.opacity(0.6))
@@ -231,7 +252,8 @@ struct RunningOverlay: View {
                 .frame(height: 4)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            // lifted off the very bottom edge so the numbers stay in view
+            .padding(.bottom, 84)
         }
         .padding(.top, 8)
     }
@@ -243,23 +265,6 @@ struct RunningOverlay: View {
         case .tense: return "Tense"
         case .learning: return "Learning"
         default: return panel.verdict.rawValue
-        }
-    }
-
-    private var caption: (String, String) {
-        switch panel.mode {
-        case .noFace, .idle: return ("Looking for you", "Bring your face back into view. Your place is held for a moment.")
-        case .away: return ("Paused", "Look back at the center to continue.")
-        case .second: return ("Paused", "Someone else is in view. Nmind pauses until it's just you.")
-        case .reading: break
-        }
-        switch panel.verdict {
-        case .learning: return ("Learning your resting face · \(panel.learnLeft)s", "Breathe normally and rest your eyes on the center.")
-        case .restless: return ("Settle", "Let your eyes rest on the center. Keep your head still.")
-        case .settling: return ("Settling", "Good. Breathe out slowly and let your eyes go soft.")
-        case .tense: return ("Steady, but held", "You are holding it with effort. Soften your eyes, unclench your jaw, let your brow go.")
-        case .mellow: return ("Mellow calm", "Easy and soft. Let it carry you deeper.")
-        case .paused: return ("Paused", "Look back at the center to continue.")
         }
     }
 
@@ -277,10 +282,82 @@ struct RunningOverlay: View {
             Text(value).font(.system(.subheadline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(Palette.foam).lineLimit(1).minimumScaleFactor(0.6)
             Text(label).font(.caption2).foregroundStyle(Palette.mist)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 12).fill(Palette.glass))
+    }
+}
+
+// MARK: the message band
+
+extension Panel {
+    var caption: (String, String) {
+        switch mode {
+        case .noFace, .idle: return ("Looking for you", "Bring your face back into view. Your place is held for a moment.")
+        case .away: return ("Paused", "Look back at the center to continue.")
+        case .second: return ("Paused", "Someone else is in view. Nmind pauses until it's just you.")
+        case .reading: break
+        }
+        switch verdict {
+        case .learning: return ("Learning your resting face · \(learnLeft)s", "Breathe normally and rest your eyes on the center.")
+        case .restless: return ("Settle", "Let your eyes rest on the center. Keep your head still.")
+        case .settling: return ("Settling", "Good. Breathe out slowly and let your eyes go soft.")
+        case .tense: return ("Steady, but held", "You are holding it with effort. Soften your eyes, unclench your jaw, let your brow go.")
+        case .mellow: return ("Mellow calm", "Easy and soft. Let it carry you deeper.")
+        case .paused: return ("Paused", "Look back at the center to continue.")
+        }
+    }
+
+}
+
+/// One message at a time, in the band below the centre target: a reward or challenge first,
+/// then a quick notice, otherwise the coaching line.
+struct MessageBand: View {
+    let banner: Banner?
+    let panel: Panel
+    let toast: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let b = banner {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(b.title).font(.headline)
+                        .foregroundStyle(b.tone == .reward ? Palette.amber : b.tone == .challenge ? Palette.teal : Palette.foam)
+                    Spacer()
+                    if let s = b.secondsLeft {
+                        Text("\(s)s").font(.system(.footnote, design: .monospaced)).foregroundStyle(Palette.mist)
+                    }
+                }
+                Text(b.detail).font(.footnote).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let p = b.progress {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Palette.current.opacity(0.6))
+                            Capsule().fill(Palette.teal).frame(width: max(4, g.size.width * p))
+                                .animation(.easeInOut(duration: 0.3), value: p)
+                        }
+                    }
+                    .frame(height: 4)
+                }
+            } else if !toast.isEmpty {
+                Text(toast).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.foam)
+            } else {
+                let c = panel.caption
+                Text(c.0).font(.subheadline.weight(.semibold))
+                    .foregroundStyle(panel.verdict == .tense && panel.mode == .reading ? Palette.amber : Palette.teal)
+                Text(c.1).font(.footnote).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Palette.glass))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(banner?.tone == .reward ? Palette.amber.opacity(0.6) : Palette.current, lineWidth: 1))
+        .animation(.easeInOut(duration: 0.35), value: banner)
     }
 }
 

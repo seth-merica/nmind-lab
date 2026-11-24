@@ -77,6 +77,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var phoneMove = 0.0, s2Held = 0.6, headYHeld = 0.0, headZHeld = -0.3
     private var lastHit: SIMD2<Double>?
     private var hrStart = 0.0
+    private var boostUntil = 0.0
 
     override init() {
         super.init()
@@ -95,7 +96,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.hrStart = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -115,6 +116,9 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         live = Live()
         UIApplication.shared.isIdleTimerDisabled = false
     }
+
+    /// A reward: travel faster for a while, as long as you stay with it.
+    func boost(_ seconds: Double) { queue.async { self.boostUntil = self.lastT + seconds } }
 
     /// Treat wherever the eyes rest right now as the centre target.
     func recenter() { queue.async { self.recenterAsked = true } }
@@ -300,6 +304,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             default: target = 0.02 * ready
             }
         }
+        if mode == .reading && t < boostUntil { target += 0.22 }
         travel += (target - travel) * min(1, dt / 2.5)
         Z = max(0, Z + travel * dt)
     }
