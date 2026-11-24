@@ -4,6 +4,7 @@ import SwiftUI
 struct VoidUniforms {
     var time = 0.0, flow = 0.0, focus = 0.3, deep = 0.0, beat = 0.0
     var folds = 7.0, hue = 0.0, iters = 1.0, wash = 0.2, bright = 0.85, kseed = 1.0
+    var beatPhase = 0.0, ripple = 0.0, heartCalm = 0.0
 }
 
 /// Turns the engine's live readings into smooth shader inputs, frame by frame.
@@ -20,6 +21,8 @@ final class VoidField {
     private var u = VoidUniforms()
     private var rate = 0.2
     private var hr = 70.0, phase = 0.0, beatAmp = 0.0
+    /// your resting rate for this session, learned slowly; beating below it counts as slowing
+    private var hrBase = 0.0, heartCalm = 0.0
     private var foldsNow = 7.0, foldsWant = 7.0, swap = 1.0
     private var hueNow = 0.0, seedNow = 1.0
     private var started = false
@@ -53,7 +56,7 @@ final class VoidField {
 
         // travel down the tunnel
         let travel = running ? max(0, live.travel) : 0
-        var want = 0.12 + 0.45 * F + 2.6 * travel
+        var want = (0.12 + 0.45 * F + 2.6 * travel) * (1 + 0.4 * heartCalm)   // a slowing heart carries you faster
         want = min(want, 1.8)
         if reduce { want *= 0.35 }
         rate += (want - rate) * min(1, dt * 0.8)
@@ -74,14 +77,25 @@ final class VoidField {
             swap = min(1, swap + dt * 1.0)
         }
 
-        // heartbeat: one soft swell per beat, only with a confident reading
+        // heartbeat: a strong swell and a ripple on every beat, only with a confident reading.
+        // Slowing your heart below where it started this session grows the core and speeds travel.
         let hasHeart = running && live.hrConf > 0.15 && live.hr > 35 && live.hr < 180
-        if hasHeart { hr += (live.hr - hr) * min(1, dt * 0.5) }
+        if hasHeart {
+            hr += (live.hr - hr) * min(1, dt * 0.8)
+            if hrBase == 0 { hrBase = hr }
+            hrBase += (hr - hrBase) * min(1, dt / 120)
+        }
+        let calmTarget = hasHeart && hrBase > 0 ? max(0, min(1, (hrBase - hr) / 8)) : 0
+        heartCalm += (calmTarget - heartCalm) * min(1, dt * 0.5)
         beatAmp += ((hasHeart ? 1.0 : 0.0) - beatAmp) * min(1, dt * 0.5)
         phase += dt * hr / 60
         phase -= floor(phase)
-        let swell = pow(0.5 - 0.5 * cos(2 * Double.pi * phase), 3)
-        let beat = beatAmp * swell * (reduce ? 0.4 : 1.0)
+        // quick rise, slow fall, like a pulse
+        let swell = phase < 0.08 ? phase / 0.08 : exp(-(phase - 0.08) * 5)
+        let beat = beatAmp * swell * (reduce ? 0.35 : 1.0)
+        u.beatPhase = phase
+        u.ripple = beatAmp * (reduce ? 0.4 : 1.0)
+        u.heartCalm = heartCalm
 
         u.time += dt
         u.focus = F
@@ -102,6 +116,7 @@ extension VoidUniforms {
         ShaderLibrary.nmindVoid(
             .float2(size.width, size.height), .float(centerY), .float(time), .float(flow),
             .float(focus), .float(deep), .float(beat), .float(folds), .float(hue), .float(iters),
-            .float(wash), .float(bright), .float(kseed))
+            .float(wash), .float(bright), .float(kseed),
+            .float(beatPhase), .float(ripple), .float(heartCalm))
     }
 }

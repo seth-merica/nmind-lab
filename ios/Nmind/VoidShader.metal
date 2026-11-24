@@ -8,7 +8,8 @@ using namespace metal;
 // and brightens it, depth adds folds and color, and `flow` carries you inward.
 //
 // Safety: the app eases every input over a second or more and caps `flow` so each ring passes
-// a point under three times a second. The beat changes brightness by a few percent only.
+// a point under two times a second. The heartbeat swell (one per beat, 35 to 180 a minute, so
+// under 3 a second) lifts brightness by at most about 22 percent, and the ripple is a moving ring.
 
 static float3 pal(float t) {
     return 0.5 + 0.5 * cos(6.2831853 * (t + float3(0.0, 0.33, 0.67)));
@@ -22,11 +23,12 @@ static float3 neon(float t) {
 [[ stitchable ]] half4 nmindVoid(float2 position, half4 currentColor,
                                  float2 size, float centerY, float time, float flow,
                                  float focus, float deep, float beat, float folds,
-                                 float hue, float iters, float wash, float bright, float kseed) {
+                                 float hue, float iters, float wash, float bright, float kseed,
+                                 float beatPhase, float ripple, float heartCalm) {
     float F = clamp(focus, 0.0, 1.0);
     float m = min(size.x, size.y);
     float2 c = float2(size.x * 0.5, size.y * centerY);
-    float zoom = 1.0 - 0.02 * beat;
+    float zoom = 1.0 - 0.045 * beat;
     float2 p = (position - c) / m * zoom;
     float r = length(p) + 1e-5;
     float a = atan2(p.y, p.x) + time * 0.03;
@@ -73,9 +75,18 @@ static float3 neon(float t) {
 
     // fog toward the centre, then the light at the end of the tunnel
     float fog = pow(clamp((r - 0.012) / mix(0.12, 0.05, deep), 0.0, 1.0), 1.5);
-    light *= fog * mix(0.3, 1.0, F) * (1.0 + 0.07 * beat) * bright;
-    float cr = r / mix(0.02, 0.07, deep * F);
-    light += exp(-cr * cr) * mix(0.15, 1.2, deep * F) * float3(1.0, 0.95, 0.9) * bright;
+    light *= fog * mix(0.3, 1.0, F) * (1.0 + 0.22 * beat) * bright;
+    // the core swells with each heartbeat and grows as your heart slows
+    float coreR = mix(0.02, 0.07, deep * F) * (1.0 + 0.35 * beat) * (1.0 + 0.6 * heartCalm);
+    float cr = r / coreR;
+    light += exp(-cr * cr) * mix(0.25, 1.2, max(deep * F, 0.3 * heartCalm)) * (1.0 + 0.5 * beat)
+             * float3(1.0, 0.9, 0.88) * bright;
+
+    // one soft ripple rolls out from the core on every beat
+    float rw = mix(0.03, 0.75, beatPhase);
+    float rd = (r - rw) / mix(0.012, 0.05, beatPhase);
+    float fade = (1.0 - beatPhase) * (1.0 - beatPhase);
+    light += exp(-rd * rd) * fade * 0.55 * ripple * float3(1.0, 0.55, 0.75) * bright;
     light *= clamp(1.15 - r * 0.9, 0.4, 1.0);
 
     float gray = (light.r + light.g + light.b) / 3.0;

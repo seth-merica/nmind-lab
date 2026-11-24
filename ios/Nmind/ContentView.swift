@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.9.1"
+    static let version = "0.10"
 }
 
 enum Palette {
@@ -210,7 +210,7 @@ struct RunningOverlay: View {
                     stat("\(Int((panel.F * 100).rounded()))%", "focus")
                     stat(calmShort, "calm")
                     stat("\(panel.depth + 1) · \(VoidWorld.name(panel.depth).components(separatedBy: " ").first ?? "")", "depth")
-                    stat(panel.heart.map { "\($0)" } ?? "—", "heart")
+                    stat(panel.heart.map { panel.heartDrop >= 2 ? "\($0) ↓\(panel.heartDrop)" : "\($0)" } ?? "—", "heart")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(caption.0).font(.subheadline.weight(.semibold))

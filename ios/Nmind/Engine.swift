@@ -39,6 +39,8 @@ struct Panel {
     var F = 0.0
     var depth = 0
     var heart: Int?
+    /// beats per minute below your rate at the start of the session (positive means slower)
+    var heartDrop = 0
     var mode: Mode = .idle
     var lock = 0.0
 }
@@ -74,6 +76,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private let motionMgr = CMMotionManager()
     private var phoneMove = 0.0, s2Held = 0.6, headYHeld = 0.0, headZHeld = -0.3
     private var lastHit: SIMD2<Double>?
+    private var hrStart = 0.0
 
     override init() {
         super.init()
@@ -92,7 +95,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.hrStart = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -306,11 +309,17 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft,
                         hr: o.hr, hrConf: o.hrConf)
         var p: Panel?
+        if o.hrConf > 0.15 && o.hr > 35 && o.hr < 180 {
+            if hrStart == 0 { hrStart = o.hr }
+            else if t - startT < 60 { hrStart += (o.hr - hrStart) * 0.01 }
+        }
         if t - lastPanel > 0.25 {
             lastPanel = t
             p = Panel(signals: o.signals, verdict: o.verdict, learnLeft: o.learnLeft, tension: o.tension, mellow: o.mellow,
                       still: o.still, fps: calm.fps, F: F, depth: VoidWorld.level(Z),
-                      heart: o.hrConf > 0.15 ? Int(o.hr.rounded()) : nil, mode: mode, lock: lock)
+                      heart: o.hrConf > 0.15 ? Int(o.hr.rounded()) : nil,
+                      heartDrop: o.hrConf > 0.15 && hrStart > 0 ? Int((hrStart - o.hr).rounded()) : 0,
+                      mode: mode, lock: lock)
         }
         DispatchQueue.main.async {
             guard self.running else { return }
