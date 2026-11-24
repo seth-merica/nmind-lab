@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.14"
+    static let version = "0.15"
 }
 
 enum Palette {
@@ -62,6 +62,11 @@ final class DrawState {
         var arc = Path()
         arc.addArc(center: c, radius: zr, startAngle: .degrees(-90), endAngle: .degrees(-90 + max(0.1, F * 360)), clockwise: false)
         ctx.stroke(arc, with: .color(Palette.teal.opacity(0.85)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+        if live.steering {
+            // a small dot in the ring shows your eyes have the wheel
+            let d: CGFloat = 7
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)), with: .color(Palette.teal.opacity(0.9)))
+        }
     }
 }
 
@@ -91,10 +96,14 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
             .contentShape(Rectangle())
-            .onTapGesture {
+            .onTapGesture(coordinateSpace: .global) { pt in
                 guard engine.running else { return }
-                engine.recenter()
-                flash("Center set where your eyes are now")
+                let b = UIScreen.main.bounds
+                if engine.tap(x: Double(pt.x / max(1, b.width)), y: Double(pt.y / max(1, b.height))) {
+                    flash("Tuned to where you tapped")
+                } else {
+                    flash("Center set where your eyes are now")
+                }
             }
 
             if engine.running {
@@ -147,7 +156,7 @@ struct IntroCard: View {
                 bullet("Hold the phone any comfortable way with your face in view. It follows where your eyes land on the screen, so moving your hand is fine.")
                 bullet("Rest your eyes on the center, soften your gaze, let your brow and jaw go.")
                 bullet("The first 20 seconds learn your resting face. Tap the screen to set the center right away.")
-                bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows.")
+                bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows. While you steer, tap a few spots you are looking at to tune it.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
             Button(action: { engine.start() }) {
@@ -375,6 +384,8 @@ struct SignalPanel: View {
                     .foregroundStyle(panel.verdict == .tense ? Palette.amber : Palette.teal)
                 Text(String(format: "tense %.2f · mellow %.2f · still %.2f · center %.0f%% · %.0f fps",
                             panel.tension, panel.mellow, panel.still, panel.lock * 100, panel.fps))
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(Palette.mist)
+                Text(panel.steer)
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(Palette.mist)
             }
             .padding(8)

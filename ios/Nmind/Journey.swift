@@ -136,7 +136,7 @@ final class Journey: ObservableObject {
         if steering && !wasSteering {
             steerCount += 1
             if steerCount == 1 {
-                show(Banner(title: "You're steering", detail: "Look where you want to go. The light and the tunnel follow your eyes.", tone: .info), for: 5)
+                show(Banner(title: "You're steering", detail: "Look where you want to go. Tap a spot you're looking at to tune it.", tone: .info), for: 5)
             } else {
                 show(Banner(title: "Steering again", detail: "Your focus is back, so the center follows your eyes.", tone: .info), for: 3)
             }
