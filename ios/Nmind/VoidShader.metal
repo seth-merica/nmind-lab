@@ -83,8 +83,8 @@ static float3 neon(float t) {
              * float3(1.0, 0.9, 0.88) * bright;
 
     // one soft ripple rolls out from the core on every beat
-    float rw = mix(0.03, 0.75, beatPhase);
-    float rd = (r - rw) / mix(0.012, 0.05, beatPhase);
+    float wr = mix(0.03, 0.75, beatPhase);
+    float rd = (r - wr) / mix(0.012, 0.05, beatPhase);
     float fade = (1.0 - beatPhase) * (1.0 - beatPhase);
     light += exp(-rd * rd) * fade * 0.55 * ripple * float3(1.0, 0.55, 0.75) * bright;
     light *= clamp(1.15 - r * 0.9, 0.4, 1.0);
