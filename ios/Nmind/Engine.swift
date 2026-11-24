@@ -63,6 +63,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var recenterAsked = false
     private var lock = 0.0
     private var F = 0.3, Z = 0.0, travel = 0.0, mellowV = 0.0
+    /// seconds of held mellow calm; the longer it holds, the faster you sink (up to 2.8x)
+    private var streak = 0.0
     private var lastPanel = 0.0
     private var skinIdx: [Int]?
 
@@ -83,7 +85,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0
+            self.center = nil; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         session.run(cfg, options: [.resetTracking, .removeExistingAnchors])
@@ -218,11 +220,20 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         let o = calm.out
         let ready = clamp((F - 0.3) / 0.4, 0, 1)
         var target: Double
-        if mode != .reading { target = -0.02 }
+        if mode != .reading { target = -0.02; streak = max(0, streak - dt * 2) }
         else {
             switch o.verdict {
-            case .mellow: target = 0.16 * ready * (0.6 + 0.4 * o.mellow) * clamp(1 - 2 * (o.tension - 0.15), 0, 1)
-            case .settling: target = 0.04 * ready
+            case .mellow: streak += dt * ready
+            case .settling: break
+            case .tense: streak = max(0, streak - dt * 1.5)
+            case .restless: streak = max(0, streak - dt * 4)
+            default: streak = max(0, streak - dt)
+            }
+            streak = min(streak, 120)
+            let momentum = 1 + min(1.8, streak / 40)
+            switch o.verdict {
+            case .mellow: target = 0.16 * momentum * ready * (0.6 + 0.4 * o.mellow) * clamp(1 - 2 * (o.tension - 0.15), 0, 1)
+            case .settling: target = 0.04 * ready * (1 + 0.5 * (momentum - 1))
             case .tense: target = 0
             case .restless: target = -0.05
             default: target = 0.02 * ready

@@ -44,12 +44,14 @@ final class DrawState {
         ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Palette.bg))
         let F = running ? live.F : 0.3
         if running { renderer.Z = live.Z }
-        let depthBoost = min(1, renderer.Z / 22)
-        let R = min(size.width, size.height) * 0.48 * scale * (0.86 + 0.22 * F)
+        // focus drives intensity; depth keeps raising the ceiling, so the deeper you are,
+        // the more intricate and vivid the same focus becomes
+        let deep = VoidWorld.deep(renderer.Z)
+        let R = min(size.width, size.height) * 0.48 * scale * (0.86 + 0.22 * F + 0.08 * deep * F)
         let st = VoidState(
             R: R, F: F,
-            I: min(1, max(0, 0.65 * F + 0.35 * depthBoost * F + 0.1)),
-            vib: min(1, max(0, 0.15 + 0.6 * F + 0.25 * live.mellow)),
+            I: min(1.7, max(0, 0.1 + 0.65 * F + 0.95 * deep * pow(F, 1.5))),
+            vib: min(1.3, max(0, 0.15 + 0.6 * F + 0.25 * live.mellow + 0.3 * deep * F)),
             wash: 1 - sat, alpha: alpha,
             scatter: max(0, 1 - F) * (1 - 0.5 * live.mellow),
             speed: max(0, live.travel), dt: dt, reduce: reduce)
@@ -207,7 +209,7 @@ struct RunningOverlay: View {
                 HStack(spacing: 8) {
                     stat("\(Int((panel.F * 100).rounded()))%", "focus")
                     stat(calmShort, "calm")
-                    stat("\(panel.depth + 1) · \(VoidWorld.names[min(panel.depth, VoidWorld.names.count - 1)].components(separatedBy: " ").first ?? "")", "depth")
+                    stat("\(panel.depth + 1) · \(VoidWorld.name(panel.depth).components(separatedBy: " ").first ?? "")", "depth")
                     stat(panel.heart.map { "\($0)" } ?? "—", "heart")
                 }
                 VStack(alignment: .leading, spacing: 4) {
