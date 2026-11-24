@@ -167,8 +167,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         return steeringNow
     }
 
-    /// Fits the gaze map to your taps. One or two taps move the centre so the newest tap lands
-    /// right; three or more spread over the screen also fit how far the eyes move per centimetre.
+    /// Fits the gaze map to your taps. One tap moves the centre so it lands right; taps spread
+    /// along an axis also fit how far the eyes move per centimetre that way.
     private func calibrate() {
         guard let last = taps.last else { return }
         let gm = gazeMap
@@ -176,51 +176,30 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             let e = SIMD2(gm.a * last.o.x + gm.b * last.o.y, gm.c * last.o.x + gm.d * last.o.y)
             center = (last.hit.x - e.x, last.hit.y - e.y)
         }
-        guard taps.count >= 3 else { applyOffset(); return }
-        // least squares: hit = c + M o, solved for each of hit's two parts
-        var s = [[Double]](repeating: [Double](repeating: 0, count: 3), count: 3)
-        var bx = [0.0, 0.0, 0.0], by = [0.0, 0.0, 0.0]
-        var mox = 0.0, moy = 0.0
-        for tp in taps { mox += tp.o.x; moy += tp.o.y }
-        mox /= Double(taps.count); moy /= Double(taps.count)
-        var spread = 0.0
-        for tp in taps {
-            let r = [tp.o.x, tp.o.y, 1.0]
-            spread += (tp.o.x - mox) * (tp.o.x - mox) + (tp.o.y - moy) * (tp.o.y - moy)
-            for i in 0..<3 {
-                for j in 0..<3 { s[i][j] += r[i] * r[j] }
-                bx[i] += r[i] * tp.hit.x; by[i] += r[i] * tp.hit.y
-            }
+        guard taps.count >= 2 else { applyOffset(); return }
+        // each axis on its own: hit.x against the screen's down offset, hit.y against its right offset
+        func fit(_ xs: [Double], _ ys: [Double], _ g0: Double, _ y0: Double) -> (g: Double, c: Double) {
+            let n = Double(xs.count)
+            let mx = xs.reduce(0, +) / n, my = ys.reduce(0, +) / n
+            var sxx = 0.0, sxy = 0.0
+            for i in 0..<xs.count { sxx += (xs[i] - mx) * (xs[i] - mx); sxy += (xs[i] - mx) * (ys[i] - my) }
+            // taps must spread about 1.5 cm along this axis before its gain is refit
+            guard (sxx / n).squareRoot() > 0.015 else { return (g0, y0) }
+            let lam = 0.0003                                     // pull toward the current gain
+            let g = Engine.gain((sxy + lam * g0) / (sxx + lam), like: nil)
+            return (g, my - g * mx)
         }
-        // the taps must span at least about 2 cm, or only the offset is trusted
-        guard (spread / Double(taps.count)).squareRoot() > 0.01 else { applyOffset(); return }
-        // keep the fit near the current map, so a stray tap cannot throw it far off
-        let lam = 0.0004
-        s[0][0] += lam; s[1][1] += lam
-        bx[0] += lam * gm.a; bx[1] += lam * gm.b
-        by[0] += lam * gm.c; by[1] += lam * gm.d
-        guard let px = solve3(s, bx), let py = solve3(s, by) else { applyOffset(); return }
-        func c1(_ v: Double) -> Double { max(-2.5, min(2.5, v)) }
-        let m = (a: c1(px[0]), b: c1(px[1]), c: c1(py[0]), d: c1(py[1]))
-        guard abs(m.a * m.d - m.b * m.c) > 0.05 else { applyOffset(); return }
-        gazeMap = m
-        center = (px[2], py[2])
+        let down = fit(taps.map { $0.o.y }, taps.map { $0.hit.x }, gm.b, last.hit.x - gm.b * last.o.y)
+        let right = fit(taps.map { $0.o.x }, taps.map { $0.hit.y }, gm.c, last.hit.y - gm.c * last.o.x)
+        gazeMap = (0, down.g, right.g, 0)
+        center = (down.c, right.c)
     }
 
-    private func solve3(_ m: [[Double]], _ v: [Double]) -> [Double]? {
-        func det(_ a: [[Double]]) -> Double {
-            a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
-                + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
-        }
-        let d = det(m)
-        guard abs(d) > 1e-14 else { return nil }
-        var out = [0.0, 0.0, 0.0]
-        for c in 0..<3 {
-            var mc = m
-            for r in 0..<3 { mc[r][c] = v[r] }
-            out[c] = det(mc) / d
-        }
-        return out
+    /// Eye-to-screen gain for one axis, never so small that noise is blown up. The slow learning
+    /// keeps the sign it has (it starts positive, as the camera's axes say); taps may flip it.
+    private static func gain(_ v: Double, like: Double?) -> Double {
+        let sign = like.map { $0 < 0 ? -1.0 : 1.0 } ?? (v < 0 ? -1.0 : 1.0)
+        return sign * max(0.3, min(1.6, v * sign))
     }
 
     // MARK: ARSessionDelegate
@@ -330,7 +309,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
         // steering: unlock after the map has learned and focus has held; hand back when focus drops
         let det = gm.a * gm.d - gm.b * gm.c
-        let mapReady = learnT > 20 && abs(det) > 0.1
+        let mapReady = learnT > 15 && abs(det) > 0.08
         steerHold = (mode == .reading && !learning && F > 0.55) ? steerHold + dt : 0
         lowT = F < 0.4 ? lowT + dt : 0
         offT = mode != .reading ? offT + dt : 0
@@ -433,13 +412,19 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                 let k = 1 - exp(-dt / tau)
                 center = (cc.x + (h.x - cc.x) * k, cc.y + (h.y - cc.y) * k)
                 // learn the gaze map while the target is away from home and the eyes follow it
-                let on = ox * ox + oy * oy
-                if on > 0.004 * 0.004 && !phoneMoving && gazeSpread < 0.05, let raw = hit {
+                // The camera's axes are fixed to the phone: on an iPhone held upright its x runs down
+                // the screen and its y runs to the right. So each screen direction has its own gain,
+                // learned alone. A full 2x2 map learned from the drifting target (whose left-right and
+                // up-down moves go together for long stretches) collapsed to one diagonal line.
+                if !phoneMoving && gazeSpread < 0.05, let raw = hit {
                     let eX = raw.x - cc.x - expect.x, eY = raw.y - cc.y - expect.y
-                    let g = 0.004 / (on + 0.01 * 0.01)
-                    func c1(_ v: Double) -> Double { max(-1.6, min(1.6, v)) }
-                    gazeMap = (c1(gm.a + g * eX * ox), c1(gm.b + g * eX * oy), c1(gm.c + g * eY * ox), c1(gm.d + g * eY * oy))
-                    learnT += dt
+                    var b = gm.b, c = gm.c
+                    if abs(oy) > 0.003 { b += 0.004 / (oy * oy + 0.0001) * eX * oy }
+                    if abs(ox) > 0.003 { c += 0.004 / (ox * ox + 0.0001) * eY * ox }
+                    if abs(oy) > 0.003 || abs(ox) > 0.003 {
+                        gazeMap = (0, Engine.gain(b, like: gm.b), Engine.gain(c, like: gm.c), 0)
+                        learnT += dt
+                    }
                 }
             }
         }
@@ -515,8 +500,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                       heart: o.hrConf > 0.15 ? Int(o.hr.rounded()) : nil,
                       heartDrop: o.hrConf > 0.15 && hrStart > 0 ? Int((hrStart - o.hr).rounded()) : 0,
                       mode: mode, lock: lock,
-                      steer: String(format: "steer %@ · taps %d · map %.2f %.2f %.2f %.2f · learn %.0fs",
-                                    steering ? "on" : "off", tuned, gazeMap.a, gazeMap.b, gazeMap.c, gazeMap.d, learnT))
+                      steer: String(format: "steer %@ · taps %d · gain down %.2f right %.2f · learn %.0fs",
+                                    steering ? "on" : "off", tuned, gazeMap.b, gazeMap.c, learnT))
         }
         DispatchQueue.main.async {
             guard self.running else { return }
