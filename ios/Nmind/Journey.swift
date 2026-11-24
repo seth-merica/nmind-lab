@@ -4,7 +4,8 @@ import SwiftUI
 //
 // Rewards: crossing into a new world blooms the void and names the world; passing your deepest
 // point ever is called out. Challenges: every few minutes a short one appears; clearing it gives
-// a speed surge and a rare color world, missing it costs nothing. Progression: rank, daily
+// a speed surge and a rare color world, missing it costs nothing. They come about once a minute
+// and climb a calm ladder: steady eyes and head first, then a soft face, then a slower heart. Progression: rank, daily
 // streak, deepest world and challenges cleared are kept on this phone only (UserDefaults).
 // Nothing is sent anywhere.
 
@@ -50,7 +51,7 @@ final class Journey: ObservableObject {
     @Published private(set) var record: Record
     @Published private(set) var lastDive: DiveSummary?
 
-    private enum Kind: CaseIterable { case heart, center, soft, mellow }
+    private enum Kind: CaseIterable { case center, still, soft, mellow, heart }
     private struct Active {
         var kind: Kind
         var title: String
@@ -60,6 +61,7 @@ final class Journey: ObservableObject {
         var elapsed = 0.0
         var held = 0.0
         var startDrop = 0
+        var limitValue = 0.0
     }
 
     private static let key = "nmind.record.v1"
@@ -69,7 +71,9 @@ final class Journey: ObservableObject {
     private var sessionBest = 0
     private var startDeepest = 0
     private var cleared = 0
-    private var nextChallenge = 90.0
+    private var nextChallenge = 30.0
+    /// calm ladder: each challenge cleared this dive asks for a little more calm
+    private var tier = 0
     private var active: Active?
     private var bannerUntil = 0.0
     private var clock = 0.0
@@ -135,8 +139,10 @@ final class Journey: ObservableObject {
                     a.held = Double(max(0, p.heartDrop - a.startDrop))
                 case .center:
                     a.held = p.lock > 0.55 ? a.held + dt : max(0, a.held - 2 * dt)
+                case .still:
+                    a.held = p.still > 0.75 ? a.held + dt : max(0, a.held - 2 * dt)
                 case .soft:
-                    a.held = p.tension < 0.25 ? a.held + dt : max(0, a.held - 2 * dt)
+                    a.held = p.tension < a.limitValue ? a.held + dt : max(0, a.held - 2 * dt)
                 case .mellow:
                     a.held = p.verdict == .mellow ? a.held + dt : max(0, a.held - 2 * dt)
                 }
@@ -144,16 +150,17 @@ final class Journey: ObservableObject {
             if a.held >= a.need {
                 active = nil
                 cleared += 1
+                tier += 1
                 record.challengesWon += 1
                 save()
-                engine.boost(15)
-                field.reward(seconds: 25)
-                show(Banner(title: "Challenge cleared", detail: "Speed surge and a rare color world.", tone: .reward), for: 5)
-                nextChallenge = sessionSeconds + Double.random(in: 180...240)
+                engine.boost(min(25, 10 + 2 * Double(tier)))
+                field.reward(seconds: min(40, 15 + 3 * Double(tier)))
+                show(Banner(title: "Calm \(tier) cleared", detail: "Speed surge and a rare color world. The next one asks for a little more.", tone: .reward), for: 5)
+                nextChallenge = sessionSeconds + Double.random(in: 25...40)
             } else if a.elapsed >= a.limit {
                 active = nil
-                show(Banner(title: "Close", detail: "No loss. Another one comes soon.", tone: .info), for: 3)
-                nextChallenge = sessionSeconds + Double.random(in: 180...240)
+                show(Banner(title: "Close", detail: "No loss. Another one comes in a moment.", tone: .info), for: 3)
+                nextChallenge = sessionSeconds + 30
             } else {
                 active = a
                 let b = Banner(id: banner?.id ?? UUID(), title: a.title, detail: a.detail, tone: .challenge,
@@ -174,24 +181,41 @@ final class Journey: ObservableObject {
     }
 
     private func start(heartOK: Bool, drop: Int) {
-        var kinds = Kind.allCases.filter { $0 != lastKind }
+        // a calming arc: first steady the eyes and head, then soften, then slow the heart
+        var kinds: [Kind]
+        switch tier {
+        case 0...1: kinds = [.center, .still]
+        case 2...3: kinds = [.soft, .mellow, .still]
+        default: kinds = [.mellow, .soft, .heart]
+        }
+        if tier >= 2 { kinds.append(.heart) }
         if !heartOK { kinds.removeAll { $0 == .heart } }
+        if kinds.count > 1 { kinds.removeAll { $0 == lastKind } }
         guard let k = kinds.randomElement() else { return }
         lastKind = k
-        let a: Active
+        let t = Double(tier)
+        let hold = min(60, 15 + 5 * t)                  // 15 s, 20 s, 25 s ... up to a minute
+        let level = "Calm \(tier + 1) · "
+        var a: Active
         switch k {
-        case .heart:
-            a = Active(kind: k, title: "Slow your heart by 5 beats", detail: "Breathe out longer than you breathe in.",
-                       limit: 75, need: 5, startDrop: drop)
         case .center:
-            a = Active(kind: k, title: "Hold the center for 30 seconds", detail: "Rest your eyes on it. Let everything else blur.",
-                       limit: 75, need: 30)
+            a = Active(kind: k, title: level + "Hold the center \(Int(hold))s", detail: "Rest your eyes on it. Let everything else blur.",
+                       limit: hold * 2 + 15, need: hold)
+        case .still:
+            a = Active(kind: k, title: level + "Be completely still \(Int(hold))s", detail: "Let your head rest. Only your breath moves.",
+                       limit: hold * 2 + 15, need: hold)
         case .soft:
-            a = Active(kind: k, title: "Soften your face for 20 seconds", detail: "Let your jaw hang loose and your brow go smooth.",
-                       limit: 60, need: 20)
+            a = Active(kind: k, title: level + "Soften your face \(Int(hold))s", detail: "Jaw loose, brow smooth, eyes soft.",
+                       limit: hold * 2 + 15, need: hold)
+            a.limitValue = max(0.12, 0.25 - 0.02 * t)   // softer each time
         case .mellow:
-            a = Active(kind: k, title: "Stay mellow for 45 seconds", detail: "Easy and soft. No effort.",
-                       limit: 90, need: 45)
+            let m = min(90, 20 + 8 * t)
+            a = Active(kind: k, title: level + "Stay mellow \(Int(m))s", detail: "Easy and soft. No effort at all.",
+                       limit: m * 2 + 15, need: m)
+        case .heart:
+            let beats = min(8, 3 + tier / 2)
+            a = Active(kind: k, title: level + "Slow your heart by \(beats)", detail: "Breathe out longer than you breathe in.",
+                       limit: 60 + 5 * t, need: Double(beats), startDrop: drop)
         }
         active = a
         withAnimation(.easeInOut(duration: 0.4)) {
@@ -206,8 +230,9 @@ final class Journey: ObservableObject {
         sessionBest = 0
         startDeepest = record.deepest
         cleared = 0
+        tier = 0
         active = nil
-        nextChallenge = 90
+        nextChallenge = 30
         banner = nil
         lastDive = nil
     }

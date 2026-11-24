@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.11"
+    static let version = "0.12"
 }
 
 enum Palette {
