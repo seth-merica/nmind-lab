@@ -93,7 +93,15 @@ To get updates later, paste in Terminal:
 cd ~/Documents/nmind-lab && git pull
 ```
 
-then press Run in Xcode again.
+then press Run in Xcode again. The version shows under the Nmind title on the phone, so you can check the new build is on it.
+
+Updates leave the Xcode project file alone, because that file holds your Team and Bundle Identifier. If `git pull` ever says your local changes would be overwritten, run
+
+```
+cd ~/Documents/nmind-lab && git checkout -- ios/Nmind.xcodeproj && git pull
+```
+
+then set Team and Bundle Identifier again (step 4) and press Run.
 
 The paid Apple Developer Program ($99 a year) removes the 7-day limit and allows TestFlight installs without a cable. It isn't needed to try the prototype.
 

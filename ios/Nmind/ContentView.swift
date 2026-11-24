@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
+/// project file, so updates never touch the file that holds your signing settings.
+enum AppInfo {
+    static let version = "0.9.1"
+}
+
 enum Palette {
     static let bg = Color(red: 9 / 255, green: 10 / 255, blue: 34 / 255)
     static let teal = Color(red: 47 / 255, green: 227 / 255, blue: 200 / 255)
@@ -123,7 +129,7 @@ struct IntroCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("PROTOTYPE · NATIVE · FACE ID CAMERA")
+            Text("PROTOTYPE v\(AppInfo.version) · FACE ID CAMERA")
                 .font(.caption2.weight(.semibold)).tracking(1.2)
                 .foregroundStyle(Palette.teal)
             Text("Travel into the void")
@@ -183,7 +189,7 @@ struct RunningOverlay: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Nmind").font(.headline).foregroundStyle(Palette.foam)
-                    Text("Prototype").font(.caption2).foregroundStyle(Palette.mist)
+                    Text("Prototype · v\(AppInfo.version)").font(.caption2).foregroundStyle(Palette.mist)
                 }
                 Spacer()
                 pill(showPanel ? "Hide view" : "Camera view") { showPanel.toggle() }
