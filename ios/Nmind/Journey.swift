@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // Rewards, challenges and progression.
@@ -137,7 +138,8 @@ final class Journey: ObservableObject {
     /// Called four times a second.
     func tick(dt: Double, engine: Engine, field: VoidField) {
         clock += dt
-        let running = engine.running
+        // the eye calibration is not part of the dive
+        let running = engine.running && !engine.calibrating
         if running && !wasRunning { begin() }
         if !running && wasRunning { end() }
         wasRunning = running

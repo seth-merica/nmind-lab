@@ -16,6 +16,9 @@ final class Soundscape {
     private var node: AVAudioSourceNode?
     private let synth = Synth()
     private var stopWork: DispatchWorkItem?
+    /// The audio session and engine are started and stopped here, off the main thread, so a slow
+    /// audio route can never freeze the screen.
+    private let audioQ = DispatchQueue(label: "nmind.audio", qos: .userInitiated)
     private(set) var enabled: Bool
 
     private init() {
@@ -36,7 +39,7 @@ final class Soundscape {
         synth.rootHz = Synth.root(for: 0)
         synth.fade = 1
         synth.running = 1
-        startEngine()
+        audioQ.async { self.startEngine() }
     }
 
     /// Called about four times a second with the live readings.
@@ -70,9 +73,10 @@ final class Soundscape {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
         stopWork = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: w)
+        audioQ.asyncAfter(deadline: .now() + 12, execute: w)
     }
 
+    /// Runs on `audioQ` only.
     private func startEngine() {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .default, options: [])

@@ -56,6 +56,11 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     @Published var running = false
     @Published var message = ""
     @Published var panel = Panel()
+    /// true while the one-time eye calibration runs at the start of a session
+    @Published var calibrating = false
+    @Published var calibDot = CalibDot()
+    /// what the calibration came to, shown once when it ends
+    @Published var calibResult = ""
 
     /// read by the canvas on the main thread
     var live = Live()
@@ -112,13 +117,31 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var tapAsked: (x: Double, y: Double)?
     private var tuned = 0
 
+    // One-time calibration (see GazeCal). `cal` is the saved one; `calRun` is a calibration in progress.
+    private var cal: GazeCal?
+    private struct CalRun {
+        var i = 0, time = 0.0, tries = 1
+        var hx: [Double] = [], hy: [Double] = [], lid: [Double] = [], dist: [Double] = []
+        var rows: [CalibPlan.Row] = []
+        var lastPub = 0.0, retries = 0
+        var note = "", noteUntil = 0.0
+    }
+    private var calRun: CalRun?
+    /// lid shape, smoothed, and a short hold on steering after it changes quickly
+    private var lidS = 0.0, lidSeeded = false, lidHoldUntil = 0.0
+
     override init() {
         super.init()
         session.delegate = self
         session.delegateQueue = queue
     }
 
-    func start() {
+    /// True once the eyes have been calibrated on this phone.
+    static var isCalibrated: Bool { GazeCal.load() != nil }
+
+    /// Starts a session. The first session on a phone, or `calibrate: true`, opens with the eye
+    /// calibration; after that the saved one is used straight away.
+    func start(calibrate: Bool = false) {
         guard Engine.supported else {
             message = "This iPhone has no Face ID camera, so Nmind can't track your face."
             return
@@ -126,10 +149,18 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         let cfg = ARFaceTrackingConfiguration()
         cfg.isLightEstimationEnabled = true
         cfg.maximumNumberOfTrackedFaces = min(2, ARFaceTrackingConfiguration.supportedNumberOfTrackedFaces)
+        let saved = GazeCal.load()
+        let doCal = calibrate || saved == nil
+        calibDot = CalibDot()
+        calibResult = ""
+        calibrating = doCal
         queue.async {
+            self.cal = saved
+            self.calRun = doCal ? CalRun() : nil
+            self.lidS = 0; self.lidSeeded = false; self.lidHoldUntil = 0
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = (0, 1, 1, 0); self.steering = false; self.steerMix = 0; self.learnT = 0; self.steerHold = 0; self.lowT = 0; self.offT = 0; self.steerSeeded = false; self.steerBuf = []; self.steerJump = false; self.taps = []; self.tapAsked = nil; self.tuned = 0; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = saved.map { (0.0, $0.gDown, $0.gRight, 0.0) } ?? (0.0, 1.0, 1.0, 0.0); self.steering = false; self.steerMix = 0; self.learnT = 0; self.steerHold = 0; self.lowT = 0; self.offT = 0; self.steerSeeded = false; self.steerBuf = []; self.steerJump = false; self.taps = []; self.tapAsked = nil; self.tuned = 0; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -145,6 +176,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     func stop() {
         session.pause()
         motionMgr.stopDeviceMotionUpdates()
+        queue.async { self.calRun = nil }
+        calibrating = false
         running = false
         live = Live()
         UIApplication.shared.isIdleTimerDisabled = false
@@ -152,6 +185,27 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
     /// A reward: travel faster for a while, as long as you stay with it.
     func boost(_ seconds: Double) { queue.async { self.boostUntil = self.lastT + seconds } }
+
+    /// Leave the calibration and go on with the saved one, if any, or learn as you go.
+    func skipCalibration() {
+        queue.async {
+            guard self.calRun != nil else { return }
+            self.calRun = nil
+            self.beginSession(self.lastT)
+            let note = self.cal == nil ? "Skipped. It will learn your eyes as you go." : "Skipped. Using your saved calibration."
+            DispatchQueue.main.async { self.calibResult = note; self.calibrating = false }
+        }
+    }
+
+    /// The session proper starts now (after the calibration): resting face, centre and steering are learned fresh.
+    private func beginSession(_ t: Double) {
+        startT = t; calm.reset(t)
+        center = nil; eyeH = []; headH = []; lookH = []
+        wanderPhase = 0; wanderAmp = 0; tx = 0.5; ty = Engine.homeY
+        steering = false; steerMix = 0; learnT = 0; steerHold = 0; lowT = 0; offT = 0; steerSeeded = false; steerBuf = []
+        taps = []; tuned = 0; hrStart = 0; lock = 0; F = 0.3; Z = 0; travel = 0; mellowV = 0; streak = 0
+        gazeMap = cal.map { (0.0, $0.gDown, $0.gRight, 0.0) } ?? (0.0, 1.0, 1.0, 0.0)
+    }
 
     /// Treat wherever the eyes rest right now as the centre target.
     func recenter() { queue.async { self.recenterAsked = true } }
@@ -176,7 +230,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             let e = SIMD2(gm.a * last.o.x + gm.b * last.o.y, gm.c * last.o.x + gm.d * last.o.y)
             center = (last.hit.x - e.x, last.hit.y - e.y)
         }
-        guard taps.count >= 2 else { applyOffset(); return }
+        // a saved calibration already knows the gains; a tap only fixes where the middle is
+        guard cal == nil, taps.count >= 2 else { applyOffset(); return }
         // each axis on its own: hit.x against the screen's down offset, hit.y against its right offset
         func fit(_ xs: [Double], _ ys: [Double], _ g0: Double, _ y0: Double) -> (g: Double, c: Double) {
             let n = Double(xs.count)
@@ -234,6 +289,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             // a brief loss (a tilt, a bump) holds your place; only a longer one lets focus fall
             let gone = t - seenT
             if gone > 1.5 { mode = .noFace }
+            if calRun != nil && gone > 0.5 { publishCalib(t, note: "Hold the phone so the camera can see your face") }
             step(t: t, dt: dt, Ftgt: gone < 2.0 ? F : 0.08)
         }
         publish(t)
@@ -296,6 +352,29 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                 eyeDist = max(0.12, Double(k) * Double(simd_length(SIMD3<Float>(g4.x, g4.y, g4.z))))
             }
         }
+
+        // Lid shape: wide eyes read up, a squint or lowered lids read down. It bends the gaze
+        // reading, so the saved calibration takes that bend out, and a quick change of the lids
+        // holds steering still for a moment so the centre does not jump with it.
+        let lid = wide - squint - 0.5 * (lidL + lidR)
+        if !lidSeeded { lidS = lid; lidSeeded = true }
+        if !shut {
+            let prev = lidS
+            lidS += (lid - lidS) * min(1, dt / 0.06)
+            if abs(lidS - prev) / dt > 1.5 { lidHoldUntil = t + 0.25 }
+        }
+
+        // the calibration runs on its own until it is done
+        if calRun != nil {
+            calibrationFrame(t: t, dt: dt, hit: shut ? nil : hit, lid: lidS, dist: eyeDist)
+            if !shut, let h = hit { lastHit = h }
+            mode = .reading
+            return
+        }
+        if let c = cal, let h = hit {
+            let dl = eyeDist * (lidS - c.lidRef)
+            hit = SIMD2(h.x - c.kDown * dl, h.y - c.kRight * dl)
+        }
         if !shut, let h = hit { lastHit = h }
 
         // move the target, then take the gaze relative to it
@@ -309,7 +388,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
         // steering: unlock after the map has learned and focus has held; hand back when focus drops
         let det = gm.a * gm.d - gm.b * gm.c
-        let mapReady = learnT > 15 && abs(det) > 0.08
+        let mapReady = cal != nil || (learnT > 15 && abs(det) > 0.08)
         steerHold = (mode == .reading && !learning && F > 0.55) ? steerHold + dt : 0
         lowT = F < 0.4 ? lowT + dt : 0
         offT = mode != .reading ? offT + dt : 0
@@ -329,7 +408,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             }
         }
 
-        if steering, !shut, let raw = hit, let cc = center {
+        if steering, !shut, t >= lidHoldUntil, let raw = hit, let cc = center {
             let gmNow = gazeMap
             let dNow = gmNow.a * gmNow.d - gmNow.b * gmNow.c
             if abs(dNow) > 0.05 {
@@ -347,10 +426,11 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             // (more than about 8 mm) sends it there in a quick glide, the way the eyes jump.
             let n = Double(steerBuf.count)
             let mx = steerBuf.reduce(0) { $0 + $1.x } / n, my = steerBuf.reduce(0) { $0 + $1.y } / n
-            // Soft edges: the reach eases off toward the sides instead of stopping dead, so a noisy
-            // or overshooting reading near an edge cannot pin the light there.
-            let fx = 0.5 + 0.38 * tanh(mx / (0.38 * screenM.w))
-            let fy = Engine.homeY + (my < 0 ? 0.28 * tanh(my / (0.28 * screenM.h)) : 0.17 * tanh(my / (0.17 * screenM.h)))
+            // Soft edges: true to the eyes over most of the screen, easing off only near the edges,
+            // so a noisy or overshooting reading cannot pin the light there and a look low on the
+            // screen still lands low.
+            let fx = 0.5 + Engine.softClip(mx / screenM.w, 0.42)
+            let fy = Engine.homeY + Engine.softClip(my / screenM.h, my < 0 ? 0.34 : 0.46)
             let dm = hypot((fx - steerX) * screenM.w, (fy - steerY) * screenM.h)
             if dm > 0.008 { steerJump = true }
             if steerJump && dm < 0.0025 { steerJump = false }
@@ -418,7 +498,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                 // the screen and its y runs to the right. So each screen direction has its own gain,
                 // learned alone. A full 2x2 map learned from the drifting target (whose left-right and
                 // up-down moves go together for long stretches) collapsed to one diagonal line.
-                if !phoneMoving && gazeSpread < 0.05, let raw = hit {
+                if cal == nil && !phoneMoving && gazeSpread < 0.05, let raw = hit {
                     let eX = raw.x - cc.x - expect.x, eY = raw.y - cc.y - expect.y
                     var b = gm.b, c = gm.c
                     if abs(oy) > 0.003 { b += 0.004 / (oy * oy + 0.0001) * eX * oy }
@@ -502,8 +582,11 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                       heart: o.hrConf > 0.15 ? Int(o.hr.rounded()) : nil,
                       heartDrop: o.hrConf > 0.15 && hrStart > 0 ? Int((hrStart - o.hr).rounded()) : 0,
                       mode: mode, lock: lock,
-                      steer: String(format: "steer %@ · taps %d · gain down %.2f right %.2f · learn %.0fs",
-                                    steering ? "on" : "off", tuned, gazeMap.b, gazeMap.c, learnT))
+                      steer: cal.map { c in
+                          String(format: "steer %@ · calibrated · gain down %.2f right %.2f · lid %.2f %.2f · taps %d",
+                                 steering ? "on" : "off", c.gDown, c.gRight, c.kDown, c.kRight, tuned)
+                      } ?? String(format: "steer %@ · taps %d · gain down %.2f right %.2f · learn %.0fs",
+                                  steering ? "on" : "off", tuned, gazeMap.b, gazeMap.c, learnT))
         }
         DispatchQueue.main.async {
             guard self.running else { return }
@@ -512,7 +595,83 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         }
     }
 
+    // MARK: calibration
+
+    /// One frame of the calibration: wait for the eyes to settle on the dot, then gather the raw
+    /// reading for a second and keep its median. After the last dot, fit and save.
+    private func calibrationFrame(t: Double, dt: Double, hit: SIMD2<Double>?, lid: Double, dist: Double) {
+        guard var r = calRun else { return }
+        let st = CalibPlan.steps[r.i]
+        r.time += dt
+        if r.time > st.settle, let h = hit {
+            r.hx.append(h.x); r.hy.append(h.y); r.lid.append(lid); r.dist.append(dist)
+        }
+        if r.time > st.settle + CalibPlan.collect {
+            let home = st.x == 0.5 && st.y == Engine.homeY
+            if r.hx.count >= 12 || (st.lid && r.retries >= 2) {
+                if r.hx.count >= 6 {
+                    let med = CalibPlan.median
+                    r.rows.append(CalibPlan.Row(ox: (st.x - 0.5) * screenM.w, oy: (st.y - Engine.homeY) * screenM.h,
+                                                hx: med(r.hx), hy: med(r.hy), lid: med(r.lid), dist: med(r.dist),
+                                                center: home, relaxed: home && !st.lid))
+                }
+                r.i += 1; r.time = 0; r.retries = 0
+            } else {
+                // too many blinks or lost frames: stay on this dot a little longer
+                r.time = st.settle; r.retries += 1
+                r.note = "Keep your eyes open on the dot"; r.noteUntil = t + 2
+            }
+            r.hx = []; r.hy = []; r.lid = []; r.dist = []
+        }
+        if r.i >= CalibPlan.steps.count {
+            if let fitted = CalibPlan.fit(r.rows) {
+                cal = fitted
+                fitted.save()
+                calRun = nil
+                beginSession(t)
+                DispatchQueue.main.async {
+                    self.calibResult = "Eyes calibrated and saved, so you won't need to do this again"
+                    self.calibrating = false
+                }
+                return
+            }
+            if r.tries < 2 {
+                r = CalRun(); r.tries = 2
+                r.note = "That didn't settle. Once more: keep your head still and move only your eyes."
+                r.noteUntil = t + 4
+            } else {
+                calRun = nil
+                beginSession(t)
+                let msg = cal == nil
+                    ? "Calibration didn't settle, so it will learn your eyes as you go. You can redo it from the start screen."
+                    : "Calibration didn't settle, so your saved one is still in use"
+                DispatchQueue.main.async { self.calibResult = msg; self.calibrating = false }
+                return
+            }
+        }
+        calRun = r
+        publishCalib(t)
+    }
+
+    private func publishCalib(_ t: Double, note: String = "") {
+        guard let r = calRun, t - r.lastPub > 0.08 else { return }
+        calRun?.lastPub = t
+        let i = min(r.i, CalibPlan.steps.count - 1)
+        let st = CalibPlan.steps[i]
+        let fill = min(1, r.time / (st.settle + CalibPlan.collect))
+        let shown = !note.isEmpty ? note : (t < r.noteUntil ? r.note : "")
+        let d = CalibDot(x: st.x, y: st.y, text: st.text, note: shown, step: i, total: CalibPlan.steps.count, fill: fill)
+        DispatchQueue.main.async { if self.calibrating { self.calibDot = d } }
+    }
+
     // MARK: helpers
+
+    /// True to the input up to three quarters of the limit, then eases toward the limit.
+    static func softClip(_ u: Double, _ L: Double) -> Double {
+        let a = 0.75 * L, m = abs(u)
+        guard m > a else { return u }
+        return (u < 0 ? -1 : 1) * (a + (L - a) * tanh((m - a) / (L - a)))
+    }
 
     private func trimLook(_ t: Double) { lookH.removeAll { t - $0.t > 5 } }
 

@@ -1,9 +1,10 @@
+import Combine
 import SwiftUI
 
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.18"
+    static let version = "0.19"
 }
 
 enum Palette {
@@ -54,7 +55,7 @@ final class DrawState {
     /// Centre target with a focus meter around it, drawn over the void.
     func drawMeter(_ ctx: inout GraphicsContext, size: CGSize, engine: Engine) {
         let live = engine.live
-        guard engine.running && live.mode == .reading else { return }
+        guard engine.running && !engine.calibrating && live.mode == .reading else { return }
         let F = live.F
         // the target sits on the far end of the tunnel and wanders with it
         let c = CGPoint(x: size.width * live.tx, y: size.height * live.ty)
@@ -100,7 +101,7 @@ struct ContentView: View {
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .global) { pt in
-                guard engine.running else { return }
+                guard engine.running && !engine.calibrating else { return }
                 let b = UIScreen.main.bounds
                 if engine.tap(x: Double(pt.x / max(1, b.width)), y: Double(pt.y / max(1, b.height))) {
                     flash("Tuned to where you tapped")
@@ -109,7 +110,10 @@ struct ContentView: View {
                 }
             }
 
-            if engine.running {
+            if engine.running && engine.calibrating {
+                CalibrationOverlay(engine: engine)
+                    .transition(.opacity)
+            } else if engine.running {
                 RunningOverlay(engine: engine, panel: engine.panel, best: journey.record.deepest, clock: journey.clockText,
                                showPanel: $showPanel, soundOn: $soundOn)
                 // every message sits in this band: below the centre target, above the stats
@@ -143,13 +147,75 @@ struct ContentView: View {
             // start and stop are handled at once, so the end card shows without a flicker of the start screen
             journey.tick(dt: 0, engine: engine, field: drawState.field)
         }
+        .onChange(of: engine.calibrating) { _, now in
+            journey.tick(dt: 0, engine: engine, field: drawState.field)
+            if !now && engine.running && !engine.calibResult.isEmpty { flash(engine.calibResult, for: 3.5) }
+        }
     }
 
-    private func flash(_ text: String) {
+    private func flash(_ text: String, for seconds: Double = 1.6) {
         withAnimation(.easeInOut(duration: 0.3)) { toast = text }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            withAnimation(.easeInOut(duration: 0.4)) { toast = "" }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            withAnimation(.easeInOut(duration: 0.4)) { if toast == text { toast = "" } }
         }
+    }
+}
+
+// MARK: calibration
+
+/// The one-time eye calibration: a dot walks the eyes to the middle and the corners, then asks for
+/// wide eyes and a squint. Steady, no flashing.
+struct CalibrationOverlay: View {
+    @ObservedObject var engine: Engine
+
+    var body: some View {
+        let d = engine.calibDot
+        GeometryReader { g in
+            ZStack {
+                Palette.bg.opacity(0.92)
+                ZStack {
+                    Circle().stroke(Palette.foam.opacity(0.18), lineWidth: 2)
+                    Circle().trim(from: 0, to: d.fill)
+                        .stroke(Palette.teal, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.1), value: d.fill)
+                    Circle().fill(Palette.foam).frame(width: 10, height: 10)
+                }
+                .frame(width: 36, height: 36)
+                .position(x: g.size.width * d.x, y: g.size.height * d.y)
+                .animation(.easeInOut(duration: 0.45), value: d.step)
+
+                VStack(spacing: 8) {
+                    Text("EYE CALIBRATION · \(min(d.step + 1, d.total)) OF \(d.total)")
+                        .font(.caption2.weight(.semibold)).tracking(1.2)
+                        .foregroundStyle(Palette.teal)
+                    Text(d.text)
+                        .font(.headline).foregroundStyle(Palette.foam)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !d.note.isEmpty {
+                        Text(d.note)
+                            .font(.footnote.weight(.medium)).foregroundStyle(Palette.foam)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("Once only. It's saved on this phone.")
+                        .font(.caption).foregroundStyle(Palette.mist)
+                }
+                .frame(width: g.size.width - 64)
+                .position(x: g.size.width / 2, y: g.size.height * 0.6)
+
+                Button(action: { engine.skipCalibration() }) {
+                    Text("Skip")
+                        .font(.footnote).foregroundStyle(Palette.mist)
+                        .padding(.horizontal, 18).padding(.vertical, 8)
+                        .background(Capsule().fill(Palette.glass))
+                        .overlay(Capsule().stroke(Palette.current, lineWidth: 1))
+                }
+                .position(x: g.size.width / 2, y: g.size.height - 56)
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 
@@ -177,8 +243,9 @@ struct IntroCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 bullet("Hold the phone any comfortable way with your face in view. It follows where your eyes land on the screen, so moving your hand is fine.")
                 bullet("Rest your eyes on the center, soften your gaze, let your brow and jaw go.")
-                bullet("The first 20 seconds learn your resting face. Tap the screen to set the center right away.")
-                bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows. While you steer, tap a few spots you are looking at to tune it.")
+                bullet("The first time, a dot walks your eyes around the screen for about 15 seconds. It's saved, so you do it once. Redo it below if tracking feels off or you switch to glasses.")
+                bullet("The first 20 seconds of a dive learn your resting face. Tap the screen to set the center right away.")
+                bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows. While you steer, tap a spot you are looking at to line it up.")
                 bullet("Sound follows you: it fills out as you focus and shimmers when you're mellow. A timed session fades out and ends on a soft bell.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
@@ -218,6 +285,13 @@ struct IntroCard: View {
                     .background(RoundedRectangle(cornerRadius: 14).fill(Palette.teal))
             }
             .padding(.top, 4)
+            Button(action: { engine.start(calibrate: true) }) {
+                Text(Engine.isCalibrated ? "Recalibrate eyes" : "Starts with a 15 second eye calibration, once")
+                    .font(.footnote)
+                    .foregroundStyle(Engine.isCalibrated ? Palette.teal : Palette.mist)
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(!Engine.isCalibrated)
             if !engine.message.isEmpty {
                 Text(engine.message)
                     .font(.footnote)
