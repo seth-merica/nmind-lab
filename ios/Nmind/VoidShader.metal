@@ -7,8 +7,9 @@ using namespace metal;
 // The tunnel is a polygon tube (never six-sided) that you fly down. For each pixel the shader
 // finds the depth of the wall it sees: a wall at depth z appears at a screen distance f*R/z from
 // that section's centre. The tube bends: near sections are centred on the screen's home point,
-// far ones on the wandering target, so the far end of the tunnel follows the target and the
-// tunnel curves toward it. The wall carries a folded neon pattern (a kaleidoscopic IFS) in
+// far ones on the target, so the far end of the tunnel follows the target and the tunnel curves
+// toward it. The body of the tube follows a trailing copy of the target, so when the target
+// jumps (your eyes steer it) the light at the end snaps there and the tunnel sweeps round after. The wall carries a folded neon pattern (a kaleidoscopic IFS) in
 // panels that shrink with distance; ribs mark each panel row, walls are lit by a lamp at your
 // eye and fade into fog, and the light at the end sits on the target.
 //
@@ -26,7 +27,7 @@ static float3 neon(float t) {
 }
 
 [[ stitchable ]] half4 nmindVoid(float2 position, half4 currentColor,
-                                 float2 size, float2 home, float2 target, float time, float flow,
+                                 float2 size, float2 home, float2 target, float2 lag, float time, float flow,
                                  float focus, float deep, float beat, float folds,
                                  float hue, float iters, float wash, float bright, float kseed,
                                  float beatPhase, float ripple, float heartCalm) {
@@ -36,6 +37,7 @@ static float3 neon(float t) {
     float zoom = 1.0 - 0.045 * beat;                 // the beat pulls you forward a touch
     float2 p = (position - h) / m * zoom;
     float2 T = (target - home) * size / m;           // the far end, relative to home
+    float2 Tl = (lag - home) * size / m;             // the tunnel's body, trailing the far end
 
     const float f = 0.5, R = 1.0, zc = 1.6, zmax = 90.0;
     float seg = 6.2831853 / max(folds, 3.0);
@@ -46,7 +48,9 @@ static float3 neon(float t) {
     float z = 3.0, rp = 0.1, af = 0.0;
     float2 d = p;
     for (int i = 0; i < 7; i++) {
-        float2 c = T * (1.0 - exp(-z / zc));
+        float bz = 1.0 - exp(-z / zc);
+        float fz = 1.0 - exp(-z / 6.0);
+        float2 c = Tl * bz + (T - Tl) * fz * fz;      // body swings after the far end
         d = p - c;
         float rr = length(d) + 1e-5;
         float a = atan2(d.y, d.x) + roll;

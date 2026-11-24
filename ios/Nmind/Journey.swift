@@ -78,6 +78,7 @@ final class Journey: ObservableObject {
     private var bannerUntil = 0.0
     private var clock = 0.0
     private var lastKind: Kind?
+    private var wasSteering = false, steerCount = 0
 
     init() {
         if let d = UserDefaults.standard.data(forKey: Journey.key),
@@ -129,6 +130,18 @@ final class Journey: ObservableObject {
             }
             sessionBest = max(sessionBest, level)
         }
+
+        // eye steering: say so the first time it unlocks, and briefly when it comes back
+        let steering = engine.live.steering
+        if steering && !wasSteering {
+            steerCount += 1
+            if steerCount == 1 {
+                show(Banner(title: "You're steering", detail: "Look where you want to go. The light and the tunnel follow your eyes.", tone: .info), for: 5)
+            } else {
+                show(Banner(title: "Steering again", detail: "Your focus is back, so the center follows your eyes.", tone: .info), for: 3)
+            }
+        }
+        wasSteering = steering
 
         // the running challenge
         if var a = active {
@@ -235,6 +248,8 @@ final class Journey: ObservableObject {
         nextChallenge = 30
         banner = nil
         lastDive = nil
+        wasSteering = false
+        steerCount = 0
     }
 
     private func end() {

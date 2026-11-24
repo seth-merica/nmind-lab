@@ -28,6 +28,8 @@ struct Live {
     /// where the centre target sits now, as a fraction of the screen's width and height
     var tx = 0.5
     var ty = Engine.homeY
+    /// true while your eyes steer the centre
+    var steering = false
 }
 
 /// What the readout and captions show, refreshed four times a second.
@@ -94,6 +96,13 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     /// screen offset (right, down) in metres to gaze-hit offset in camera space: [a b; c d]
     private var gazeMap = (a: 0.0, b: 1.0, c: 1.0, d: 0.0)
 
+    // Eye steering. Once the gaze map has learned how your eyes follow the target and you have
+    // held focus for a few seconds, the centre goes where you look. A one-euro filter keeps it
+    // still when your eyes rest and lets it jump with a quick look. Losing focus hands the centre
+    // back to its slow wander.
+    private var steering = false, steerMix = 0.0, learnT = 0.0, steerHold = 0.0, lowT = 0.0, offT = 0.0
+    private var steerX = 0.5, steerY = Engine.homeY, steerDX = 0.0, steerDY = 0.0, steerSeeded = false
+
     override init() {
         super.init()
         session.delegate = self
@@ -111,7 +120,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = (0, 1, 1, 0); self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = (0, 1, 1, 0); self.steering = false; self.steerMix = 0; self.learnT = 0; self.steerHold = 0; self.lowT = 0; self.offT = 0; self.steerSeeded = false; self.steerDX = 0; self.steerDY = 0; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -225,13 +234,43 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
         // move the target, then take the gaze relative to it
         let learning = calm.out.learning
-        if mode == .reading && !learning { wanderPhase += dt }
+        if mode == .reading && !learning && !steering { wanderPhase += dt }
         wanderAmp += ((mode == .reading && !learning ? 1.0 : 0.0) - wanderAmp) * min(1, dt / 6)
         let w = wanderPhase * 2 * Double.pi
-        tx = 0.5 + wanderAmp * (0.22 * sin(w / 27) + 0.06 * sin(w / 71 + 2.1))
-        ty = Engine.homeY + wanderAmp * (0.09 * sin(w / 37 + 1.3) + 0.02 * sin(w / 53))
-        let ox = (tx - 0.5) * screenM.w, oy = (ty - Engine.homeY) * screenM.h
+        let wx = 0.5 + wanderAmp * (0.22 * sin(w / 27) + 0.06 * sin(w / 71 + 2.1))
+        let wy = Engine.homeY + wanderAmp * (0.09 * sin(w / 37 + 1.3) + 0.02 * sin(w / 53))
         let gm = gazeMap
+
+        // steering: unlock after the map has learned and focus has held; hand back when focus drops
+        let det = gm.a * gm.d - gm.b * gm.c
+        let mapReady = learnT > 20 && abs(det) > 0.1
+        steerHold = (mode == .reading && !learning && F > 0.55) ? steerHold + dt : 0
+        lowT = F < 0.4 ? lowT + dt : 0
+        offT = mode != .reading ? offT + dt : 0
+        if !steering && mapReady && steerHold > 3 { steering = true; steerSeeded = false }
+        if steering && (lowT > 2 || offT > 1.5 || learning) { steering = false }
+        if steering, blink < 0.4, let raw = hit, let cc = center {
+            // where on the screen the eyes point, from the inverse of the learned map
+            let gx = raw.x - cc.x, gy = raw.y - cc.y
+            let sx = (gm.d * gx - gm.b * gy) / det, sy = (-gm.c * gx + gm.a * gy) / det
+            let rawX = clamp(0.5 + sx / screenM.w, 0.1, 0.9)
+            let rawY = clamp(Engine.homeY + sy / screenM.h, 0.14, 0.6)
+            if !steerSeeded { steerX = tx; steerY = ty; steerDX = 0; steerDY = 0; steerSeeded = true }
+            // one-euro filter: heavy smoothing at rest, almost none during a quick look
+            let dAlpha = 1 - exp(-dt * 2 * Double.pi * 1.2)
+            steerDX += ((rawX - steerX) / dt - steerDX) * dAlpha
+            steerDY += ((rawY - steerY) / dt - steerDY) * dAlpha
+            let speed = hypot(steerDX, steerDY)
+            let fc = 1.4 + 9.0 * speed
+            let kf = 1 - exp(-dt * 2 * Double.pi * fc)
+            steerX += (rawX - steerX) * kf
+            steerY += (rawY - steerY) * kf
+        }
+        steerMix += ((steering ? 1.0 : 0.0) - steerMix) * min(1, dt / (steering ? 0.35 : 1.5))
+        if !steering && steerMix < 0.001 { steerX = wx; steerY = wy }
+        tx = wx + (steerX - wx) * steerMix
+        ty = wy + (steerY - wy) * steerMix
+        let ox = (tx - 0.5) * screenM.w, oy = (ty - Engine.homeY) * screenM.h
         let expect = SIMD2(gm.a * ox + gm.b * oy, gm.c * ox + gm.d * oy)
         let res: SIMD2<Double>? = hit.map { $0 - expect }
 
@@ -275,7 +314,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         // shifted grip recovers on its own; tapping the screen sets it at once.
         if blink < 0.4 && looking, let h = res {
             if recenterAsked || center == nil { center = (h.x, h.y); recenterAsked = false }
-            else if let cc = center {
+            else if !steering, let cc = center {
                 let off = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
                 let steady = eyeH.count >= 20 && gazeSpread < 0.03 && (eyeH.last!.t - eyeH.first!.t) > 1.2
                 let tau = calm.out.learning ? 3.0 : (steady && off > 0.06 ? 2.5 : 25.0)
@@ -288,13 +327,16 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
                     let g = 0.004 / (on + 0.01 * 0.01)
                     func c1(_ v: Double) -> Double { max(-1.6, min(1.6, v)) }
                     gazeMap = (c1(gm.a + g * eX * ox), c1(gm.b + g * eX * oy), c1(gm.c + g * eY * ox), c1(gm.d + g * eY * oy))
+                    learnT += dt
                 }
             }
         }
         if let cc = center, let raw = lastHit {
             let h = raw - expect
             let dev = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
-            let target = looking ? exp(-max(0, dev - 0.05) / 0.12) : 0
+            // while you steer, the centre follows your eyes, so only a wide miss (a quick look
+            // the centre has not caught up with yet) loosens the lock
+            let target = !looking ? 0 : (steering ? 0.25 + 0.7 * exp(-max(0, dev - 0.1) / 0.2) : exp(-max(0, dev - 0.05) / 0.12))
             lock += (target - lock) * (1 - exp(-dt / 0.4))
         }
         // eye jumps are read from the gaze on the screen, so following the screen as the hand
@@ -348,7 +390,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private func publish(_ t: Double) {
         let o = calm.out
         let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft,
-                        hr: o.hr, hrConf: o.hrConf, tx: tx, ty: ty)
+                        hr: o.hr, hrConf: o.hrConf, tx: tx, ty: ty, steering: steering)
         var p: Panel?
         if o.hrConf > 0.15 && o.hr > 35 && o.hr < 180 {
             if hrStart == 0 { hrStart = o.hr }

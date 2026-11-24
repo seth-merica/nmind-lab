@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.13"
+    static let version = "0.14"
 }
 
 enum Palette {
@@ -147,6 +147,7 @@ struct IntroCard: View {
                 bullet("Hold the phone any comfortable way with your face in view. It follows where your eyes land on the screen, so moving your hand is fine.")
                 bullet("Rest your eyes on the center, soften your gaze, let your brow and jaw go.")
                 bullet("The first 20 seconds learn your resting face. Tap the screen to set the center right away.")
+                bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
             Button(action: { engine.start() }) {

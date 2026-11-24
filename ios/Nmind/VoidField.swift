@@ -7,6 +7,9 @@ struct VoidUniforms {
     var beatPhase = 0.0, ripple = 0.0, heartCalm = 0.0
     /// the far end of the tunnel, as a fraction of the screen
     var tx = 0.5, ty = Engine.homeY
+    /// where the body of the tunnel is swinging toward; it trails the far end, so a quick look
+    /// snaps the light there and the tunnel sweeps round after it
+    var lx = 0.5, ly = Engine.homeY
 }
 
 /// Turns the engine's live readings into smooth shader inputs, frame by frame.
@@ -120,8 +123,15 @@ final class VoidField {
         u.wash = 1 - sat
         u.bright = alpha * (0.3 + 0.7 * swap) * (1 + 0.35 * bloomEnv)
         u.heartCalm = max(heartCalm, 0.8 * bloomEnv)
-        u.tx = running ? live.tx : 0.5
-        u.ty = running ? live.ty : Engine.homeY
+        // the far end eases to the target at the frame rate (the face reads arrive at 60 a second);
+        // the tunnel's body trails it by about a quarter of a second
+        let wantX = running ? live.tx : 0.5, wantY = running ? live.ty : Engine.homeY
+        let kT = 1 - exp(-dt / (running && live.steering ? 0.02 : 0.08))
+        u.tx += (wantX - u.tx) * kT
+        u.ty += (wantY - u.ty) * kT
+        let kL = 1 - exp(-dt / 0.25)
+        u.lx += (u.tx - u.lx) * kL
+        u.ly += (u.ty - u.ly) * kL
         return u
     }
 }
@@ -129,7 +139,7 @@ final class VoidField {
 extension VoidUniforms {
     func shader(size: CGSize) -> Shader {
         ShaderLibrary.nmindVoid(
-            .float2(size.width, size.height), .float2(0.5, Engine.homeY), .float2(tx, ty),
+            .float2(size.width, size.height), .float2(0.5, Engine.homeY), .float2(tx, ty), .float2(lx, ly),
             .float(time), .float(flow),
             .float(focus), .float(deep), .float(beat), .float(folds), .float(hue), .float(iters),
             .float(wash), .float(bright), .float(kseed),
