@@ -22,6 +22,8 @@ jobs:
           ls -d /Applications/Xcode*.app
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           xcodebuild -version
+      - name: Get the Metal shader compiler
+        run: xcodebuild -downloadComponent MetalToolchain || echo "Metal toolchain already present or not needed"
       - name: Build unsigned for iPhone
         run: |
           set -o pipefail

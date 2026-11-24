@@ -12,64 +12,50 @@ enum Palette {
     static let alert = Color(red: 226 / 255, green: 96 / 255, blue: 31 / 255)
 }
 
-/// Holds the drawing state between frames: the void itself and the eased look for each mode.
+/// Holds the drawing state between frames: the void's shader inputs and the eased look for each mode.
 final class DrawState {
-    let renderer = VoidRenderer()
+    let field = VoidField()
     private var last: Date?
-    private var alpha = 0.85, sat = 0.8, scale = 1.0
+    private var alpha = 0.85, sat = 0.8
+    static let centerY = 0.42
 
-    func draw(_ ctx: inout GraphicsContext, size: CGSize, date: Date, engine: Engine, reduce: Bool) {
+    /// Advances one frame and returns the shader inputs for it.
+    func frame(date: Date, engine: Engine, reduce: Bool) -> VoidUniforms {
         let dt = last.map { min(0.1, max(0.001, date.timeIntervalSince($0))) } ?? 1.0 / 60
         last = date
         let live = engine.live
         let running = engine.running
 
         // each state has its own look; every change is eased over about a second
-        let target: (Double, Double, Double)
-        if !running { target = (0.85, 0.8, 1.0) }
+        let target: (Double, Double)
+        if !running { target = (0.85, 0.8) }
         else {
             switch live.mode {
-            case .reading: target = (1.0, 1.0, 1.0)
-            case .noFace: target = (0.55, 0.5, 0.92)
-            case .away: target = (0.6, 0.45, 0.95)
-            case .second: target = (0.4, 0.2, 0.9)
-            case .idle: target = (0.85, 0.8, 1.0)
+            case .reading: target = (1.0, 1.0)
+            case .noFace: target = (0.55, 0.5)
+            case .away: target = (0.6, 0.45)
+            case .second: target = (0.4, 0.2)
+            case .idle: target = (0.85, 0.8)
             }
         }
         let e = min(1, dt * 1.4)
         alpha += (target.0 - alpha) * e
         sat += (target.1 - sat) * e
-        scale += (target.2 - scale) * e
+        return field.update(date: date, live: live, running: running, alpha: alpha, sat: sat, reduce: reduce)
+    }
 
-        ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Palette.bg))
-        let F = running ? live.F : 0.3
-        if running { renderer.Z = live.Z }
-        // focus drives intensity; depth keeps raising the ceiling, so the deeper you are,
-        // the more intricate and vivid the same focus becomes
-        let deep = VoidWorld.deep(renderer.Z)
-        let R = min(size.width, size.height) * 0.48 * scale * (0.86 + 0.22 * F + 0.08 * deep * F)
-        let st = VoidState(
-            R: R, F: F,
-            I: min(1.7, max(0, 0.1 + 0.65 * F + 0.95 * deep * pow(F, 1.5))),
-            vib: min(1.3, max(0, 0.15 + 0.6 * F + 0.25 * live.mellow + 0.3 * deep * F)),
-            wash: 1 - sat, alpha: alpha,
-            scatter: max(0, 1 - F) * (1 - 0.5 * live.mellow),
-            speed: max(0, live.travel), dt: dt, reduce: reduce)
-        let c = CGPoint(x: size.width / 2, y: size.height * 0.42)
-        renderer.draw(&ctx, center: c, st: st)
-
-        // centre target with a focus meter around it
-        if running && live.mode == .reading {
-            let zr = min(size.width, size.height) * 0.1
-            let ring = Path(ellipseIn: CGRect(x: c.x - zr, y: c.y - zr, width: zr * 2, height: zr * 2))
-            ctx.stroke(ring, with: .color(Palette.mist.opacity(0.2)), lineWidth: 2)
-            var arc = Path()
-            arc.addArc(center: c, radius: zr, startAngle: .degrees(-90), endAngle: .degrees(-90 + max(0.1, F * 360)), clockwise: false)
-            ctx.stroke(arc, with: .color(Palette.teal.opacity(0.85)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-            let dr = 2.5 + 1.5 * F
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - dr, y: c.y - dr, width: dr * 2, height: dr * 2)),
-                     with: .color(Palette.foam.opacity(0.5 + 0.4 * F)))
-        }
+    /// Centre target with a focus meter around it, drawn over the void.
+    func drawMeter(_ ctx: inout GraphicsContext, size: CGSize, engine: Engine) {
+        let live = engine.live
+        guard engine.running && live.mode == .reading else { return }
+        let F = live.F
+        let c = CGPoint(x: size.width / 2, y: size.height * DrawState.centerY)
+        let zr = min(size.width, size.height) * 0.1
+        let ring = Path(ellipseIn: CGRect(x: c.x - zr, y: c.y - zr, width: zr * 2, height: zr * 2))
+        ctx.stroke(ring, with: .color(Palette.foam.opacity(0.18)), lineWidth: 2)
+        var arc = Path()
+        arc.addArc(center: c, radius: zr, startAngle: .degrees(-90), endAngle: .degrees(-90 + max(0.1, F * 360)), clockwise: false)
+        ctx.stroke(arc, with: .color(Palette.teal.opacity(0.85)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
     }
 }
 
@@ -83,8 +69,16 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             TimelineView(.animation) { tl in
-                Canvas { ctx, size in
-                    drawState.draw(&ctx, size: size, date: tl.date, engine: engine, reduce: reduce)
+                GeometryReader { geo in
+                    let u = drawState.frame(date: tl.date, engine: engine, reduce: reduce)
+                    ZStack {
+                        Rectangle()
+                            .fill(Palette.bg)
+                            .colorEffect(u.shader(size: geo.size, centerY: DrawState.centerY))
+                        Canvas { ctx, size in
+                            drawState.drawMeter(&ctx, size: size, engine: engine)
+                        }
+                    }
                 }
             }
             .ignoresSafeArea()

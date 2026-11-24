@@ -21,6 +21,9 @@ struct Live {
     var mode: Mode = .idle
     var verdict: Verdict = .learning
     var learnLeft = 20
+    /// heart rate from the camera, and how sure the reading is (0 to 1)
+    var hr = 0.0
+    var hrConf = 0.0
 }
 
 /// What the readout and captions show, refreshed four times a second.
@@ -245,7 +248,8 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
     private func publish(_ t: Double) {
         let o = calm.out
-        let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft)
+        let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft,
+                        hr: o.hr, hrConf: o.hrConf)
         var p: Panel?
         if t - lastPanel > 0.25 {
             lastPanel = t
