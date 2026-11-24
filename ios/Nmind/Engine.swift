@@ -1,5 +1,6 @@
 import ARKit
 import Combine
+import CoreMotion
 import UIKit
 
 // Reads the face with ARKit on the Face ID (TrueDepth) camera: head pose, eye rotation,
@@ -70,6 +71,9 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var streak = 0.0
     private var lastPanel = 0.0
     private var skinIdx: [Int]?
+    private let motionMgr = CMMotionManager()
+    private var phoneMove = 0.0, s2Held = 0.6, headYHeld = 0.0, headZHeld = -0.3
+    private var lastHit: SIMD2<Double>?
 
     override init() {
         super.init()
@@ -88,8 +92,12 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         queue.async {
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
+        }
+        if motionMgr.isDeviceMotionAvailable {
+            motionMgr.deviceMotionUpdateInterval = 1.0 / 60
+            motionMgr.startDeviceMotionUpdates()
         }
         session.run(cfg, options: [.resetTracking, .removeExistingAnchors])
         message = ""
@@ -99,6 +107,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
 
     func stop() {
         session.pause()
+        motionMgr.stopDeviceMotionUpdates()
         running = false
         live = Live()
         UIApplication.shared.isIdleTimerDisabled = false
@@ -136,8 +145,10 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         } else {
             secondT = 0
             lookH.append((t, false)); trimLook(t)
-            if t - seenT > 0.7 { mode = .noFace }
-            step(t: t, dt: dt, Ftgt: 0.08)
+            // a brief loss (a tilt, a bump) holds your place; only a longer one lets focus fall
+            let gone = t - seenT
+            if gone > 1.5 { mode = .noFace }
+            step(t: t, dt: dt, Ftgt: gone < 2.0 ? F : 0.08)
         }
         publish(t)
     }
@@ -166,50 +177,94 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         let len = simd_length(lp)
         let ln = len > 1e-5 ? lp / len : SIMD3<Float>(0, 0, 1)
         let ex = Double(atan2(ln.x, ln.z)), ey = Double(atan2(ln.y, ln.z))
-        // gaze direction in camera space, for the centre lock
-        let g = simd_mul(R, SIMD4<Float>(ln.x, ln.y, ln.z, 0))
-        let gx = Double(atan2(g.x, g.z)), gy = Double(atan2(g.y, g.z))
 
-        // attention: facing the phone, eyes on the screen, nobody else in view
-        let facing = abs(yaw) < 0.45 && abs(pitch) < 0.45 && abs(gx) < 0.6 && abs(gy) < 0.6
+        // Where the gaze lands on the phone. The eyes' midpoint and gaze direction are put in
+        // camera space, and the ray is met with the plane of the screen. A point on the screen
+        // stays the same point however the phone is held, tilted or moved, so the centre target
+        // is kept as a spot on the glass and focus no longer depends on holding the phone just so.
+        let lm = a.leftEyeTransform.columns.3, rm = a.rightEyeTransform.columns.3
+        let mid = SIMD3<Float>((lm.x + rm.x) / 2, (lm.y + rm.y) / 2, (lm.z + rm.z) / 2)
+        var gdir = lp - mid
+        let gl = simd_length(gdir)
+        gdir = gl > 1e-5 ? gdir / gl : SIMD3<Float>(0, 0, 1)
+        let o4 = simd_mul(R, SIMD4<Float>(mid.x, mid.y, mid.z, 1))
+        let g4 = simd_mul(R, SIMD4<Float>(gdir.x, gdir.y, gdir.z, 0))
+        var hit: SIMD2<Double>? = nil
+        var eyeDist = max(0.12, Double(simd_length(SIMD3<Float>(o4.x, o4.y, o4.z))))
+        if abs(g4.z) > 0.05 {
+            let k = -o4.z / g4.z
+            if k > 0 {
+                let hx = Double(o4.x + k * g4.x), hy = Double(o4.y + k * g4.y)
+                hit = SIMD2(hx, hy)
+                eyeDist = max(0.12, Double(k) * Double(simd_length(SIMD3<Float>(g4.x, g4.y, g4.z))))
+            }
+        }
+        if blink < 0.4, let h = hit { lastHit = h }
+
+        // phone movement from the motion sensors: quick moves of the hand are not the body
+        // getting restless, so head stillness is held, not marked down, while the phone moves
+        var moveNow = 0.0
+        if let dm = motionMgr.deviceMotion {
+            let r = dm.rotationRate, ua = dm.userAcceleration
+            moveNow = (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot() + 3 * (ua.x * ua.x + ua.y * ua.y + ua.z * ua.z).squareRoot()
+        }
+        phoneMove += (moveNow - phoneMove) * min(1, dt / (moveNow > phoneMove ? 0.05 : 0.4))
+        let phoneMoving = phoneMove > 0.35
+
+        // attention: face toward the phone (loosely) and the gaze landing on or near the phone
+        let onPhone = lastHit.map { simd_length($0) < 0.26 } ?? true
+        let facing = abs(yaw) < 0.8 && abs(pitch) < 0.8 && onPhone
         awayT = facing ? 0 : awayT + dt
         if secondT > 0.4 { mode = .second }
-        else if awayT > 0.8 { mode = .away }
+        else if awayT > 1.2 { mode = .away }
         else { mode = .reading }
         let looking = mode == .reading
         lookH.append((t, looking)); trimLook(t)
 
-        // steadiness of the eyes and the head over the last couple of seconds
-        if blink < 0.4 { eyeH.append((t, ex, ey)) }
+        // steadiness of the gaze on the screen and of the head over the last couple of seconds
+        if blink < 0.4, let h = hit { eyeH.append((t, h.x, h.y)) }
         eyeH.removeAll { t - $0.t > 1.5 }
-        headH.append((t, pos, yaw, pitch))
-        headH.removeAll { t - $0.t > 2 }
-        let s1 = exp(-max(0, eyeSpread() - 0.008) / 0.02)
-        let (pSp, rSp) = headSpread()
-        let s2 = exp(-max(0, pSp - 0.0015) / 0.004) * exp(-max(0, rSp - 0.01) / 0.025)
+        let gazeSpread = eyeSpread() / eyeDist                      // radians, as seen from the eyes
+        let s1 = exp(-max(0, gazeSpread - 0.012) / 0.03)
+        if !phoneMoving {
+            headH.append((t, pos, yaw, pitch))
+            headH.removeAll { t - $0.t > 2 }
+            let (pSp, rSp) = headSpread()                            // slow drift of the arm is removed
+            s2Held = exp(-max(0, pSp - 0.0025) / 0.006) * exp(-max(0, rSp - 0.015) / 0.035)
+            headYHeld = pos.y; headZHeld = pos.z
+        }
+        let s2 = s2Held
         let s3 = lookH.isEmpty ? 0 : Double(lookH.filter { $0.v }.count) / Double(lookH.count)
 
-        // centre lock: the eyes stay where they rested on the centre target
-        if blink < 0.4 && looking {
-            if recenterAsked || center == nil { center = (gx, gy); recenterAsked = false }
+        // centre lock: the gaze stays on the same spot of the screen. A steady gaze held on
+        // another spot for a couple of seconds pulls the centre there, so a bad start or a
+        // shifted grip recovers on its own; tapping the screen sets it at once.
+        if blink < 0.4 && looking, let h = hit {
+            if recenterAsked || center == nil { center = (h.x, h.y); recenterAsked = false }
             else if let cc = center {
-                let k = calm.out.learning ? 1 - exp(-dt / 3) : 1 - exp(-dt / 25)
-                center = (cc.x + (gx - cc.x) * k, cc.y + (gy - cc.y) * k)
+                let off = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
+                let steady = eyeH.count >= 20 && gazeSpread < 0.03 && (eyeH.last!.t - eyeH.first!.t) > 1.2
+                let tau = calm.out.learning ? 3.0 : (steady && off > 0.06 ? 2.5 : 25.0)
+                let k = 1 - exp(-dt / tau)
+                center = (cc.x + (h.x - cc.x) * k, cc.y + (h.y - cc.y) * k)
             }
         }
-        if let cc = center {
-            let dev = hypot(gx - cc.x, gy - cc.y)
-            let target = looking ? exp(-max(0, dev - 0.04) / 0.10) : 0
+        if let cc = center, let h = lastHit {
+            let dev = hypot(h.x - cc.x, h.y - cc.y) / eyeDist
+            let target = looking ? exp(-max(0, dev - 0.05) / 0.12) : 0
             lock += (target - lock) * (1 - exp(-dt / 0.4))
         }
+        // eye jumps are read from the gaze on the screen, so following the screen as the hand
+        // moves does not count as restless eyes
+        let gx = lastHit.map { $0.x / eyeDist } ?? ex, gy = lastHit.map { $0.y / eyeDist } ?? ey
 
         // skin colour on forehead and cheeks, for the camera pulse (a hint)
         let rgb = sampleSkin(a, frame: frame)
         let ambient = frame.lightEstimate.map { Double($0.ambientIntensity) }
 
-        let out = calm.frame(CalmInput(t: t, dt: dt, looking: looking, blink: blink, ex: ex, ey: ey,
+        let out = calm.frame(CalmInput(t: t, dt: dt, looking: looking, blink: blink, ex: gx, ey: gy,
                                        s1: s1, s2: s2, s3: s3, squint: squint, wide: wide, brow: brow, jaw: jaw,
-                                       headY: pos.y, headZ: pos.z, rgb: rgb, ambient: ambient))
+                                       headY: headYHeld, headZ: headZHeld, rgb: rgb, ambient: ambient))
         let calmV = clamp((out.still - 0.3) / 0.6, 0, 1)
         let Ftgt = looking ? 0.55 * lock + 0.45 * calmV : 0.08
         let mTarget = out.verdict == .mellow ? out.mellow : out.mellow * 0.4
@@ -276,19 +331,27 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         return v.squareRoot()
     }
 
+    /// Head movement over the last two seconds after a straight-line trend is taken out, so a slow
+    /// sag or drift of the arm holding the phone is not read as fidgeting.
     private func headSpread() -> (Double, Double) {
-        guard headH.count >= 4 else { return (0, 0) }
+        guard headH.count >= 8 else { return (0, 0) }
         let n = Double(headH.count)
-        var mp = SIMD3<Double>(0, 0, 0), my = 0.0, mpi = 0.0
-        for h in headH { mp += h.p; my += h.yaw; mpi += h.pitch }
-        mp /= n; my /= n; mpi /= n
-        var vp = 0.0, vr = 0.0
-        for h in headH {
-            let d = h.p - mp
-            vp += d.x * d.x + d.y * d.y + d.z * d.z
-            vr += (h.yaw - my) * (h.yaw - my) + (h.pitch - mpi) * (h.pitch - mpi)
+        let t0 = headH[0].t
+        let ts = headH.map { $0.t - t0 }
+        let mt = ts.reduce(0, +) / n
+        let vt = max(1e-6, ts.reduce(0) { $0 + ($1 - mt) * ($1 - mt) })
+        func residual(_ xs: [Double]) -> Double {
+            let mx = xs.reduce(0, +) / n
+            var cov = 0.0
+            for i in 0..<xs.count { cov += (ts[i] - mt) * (xs[i] - mx) }
+            let slope = cov / vt
+            var r = 0.0
+            for i in 0..<xs.count { let e = xs[i] - mx - slope * (ts[i] - mt); r += e * e }
+            return r / n
         }
-        return ((vp / n).squareRoot(), (vr / n).squareRoot())
+        let vp = residual(headH.map { $0.p.x }) + residual(headH.map { $0.p.y }) + residual(headH.map { $0.p.z })
+        let vr = residual(headH.map { $0.yaw }) + residual(headH.map { $0.pitch })
+        return (vp.squareRoot(), vr.squareRoot())
     }
 
     /// Mean skin colour (0 to 255) on the forehead and both cheeks, read from the colour frame.

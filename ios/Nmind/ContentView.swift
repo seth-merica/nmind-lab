@@ -134,9 +134,9 @@ struct IntroCard: View {
                 .foregroundStyle(Palette.mist)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 6) {
-                bullet("Hold the phone at arm's length with your face in view.")
+                bullet("Hold the phone any comfortable way with your face in view. It follows where your eyes land on the screen, so moving your hand is fine.")
                 bullet("Rest your eyes on the center, soften your gaze, let your brow and jaw go.")
-                bullet("The first 20 seconds learn your resting face. Tap the screen to re-center.")
+                bullet("The first 20 seconds learn your resting face. Tap the screen to set the center right away.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
             Button(action: { engine.start() }) {
@@ -242,7 +242,7 @@ struct RunningOverlay: View {
 
     private var caption: (String, String) {
         switch panel.mode {
-        case .noFace, .idle: return ("Looking for you", "Hold the phone at arm's length with your face in view.")
+        case .noFace, .idle: return ("Looking for you", "Bring your face back into view. Your place is held for a moment.")
         case .away: return ("Paused", "Look back at the center to continue.")
         case .second: return ("Paused", "Someone else is in view. Nmind pauses until it's just you.")
         case .reading: break
