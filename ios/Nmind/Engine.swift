@@ -199,7 +199,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     /// keeps the sign it has (it starts positive, as the camera's axes say); taps may flip it.
     private static func gain(_ v: Double, like: Double?) -> Double {
         let sign = like.map { $0 < 0 ? -1.0 : 1.0 } ?? (v < 0 ? -1.0 : 1.0)
-        return sign * max(0.3, min(1.6, v * sign))
+        return sign * max(0.7, min(1.6, v * sign))
     }
 
     // MARK: ARSessionDelegate
@@ -347,8 +347,10 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             // (more than about 8 mm) sends it there in a quick glide, the way the eyes jump.
             let n = Double(steerBuf.count)
             let mx = steerBuf.reduce(0) { $0 + $1.x } / n, my = steerBuf.reduce(0) { $0 + $1.y } / n
-            let fx = clamp(0.5 + mx / screenM.w, 0.1, 0.9)
-            let fy = clamp(Engine.homeY + my / screenM.h, 0.12, 0.6)
+            // Soft edges: the reach eases off toward the sides instead of stopping dead, so a noisy
+            // or overshooting reading near an edge cannot pin the light there.
+            let fx = 0.5 + 0.38 * tanh(mx / (0.38 * screenM.w))
+            let fy = Engine.homeY + (my < 0 ? 0.28 * tanh(my / (0.28 * screenM.h)) : 0.17 * tanh(my / (0.17 * screenM.h)))
             let dm = hypot((fx - steerX) * screenM.w, (fy - steerY) * screenM.h)
             if dm > 0.008 { steerJump = true }
             if steerJump && dm < 0.0025 { steerJump = false }
