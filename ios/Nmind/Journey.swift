@@ -52,6 +52,8 @@ struct SessionSummary {
     var dives = 0
     var bookSeconds = 0.0
     var bookWords = 0
+    var bookMode = ""          // "Deep Listen" or "Lab test at 3x"
+    var quizLine: String?
 }
 
 /// One message in the band under the centre target.
@@ -70,6 +72,8 @@ final class Journey: ObservableObject {
     @Published private(set) var record: Record
     @Published private(set) var lastDive: DiveSummary?
     @Published var summary: SessionSummary?
+    /// the book feed check, shown before the summary
+    @Published var quiz: BookQuiz?
     /// session length in minutes; 0 runs until you stop
     @Published var plannedMinutes: Int {
         didSet { UserDefaults.standard.set(plannedMinutes, forKey: Journey.minutesKey) }
@@ -195,9 +199,14 @@ final class Journey: ObservableObject {
         let calmNow = reading && engine.live.F > 0.55 && (p.verdict == .mellow || p.verdict == .settling)
         switch book.tick(dt: dt, reading: reading, calm: calmNow) {
         case .started:
-            show(Banner(title: "Book feed", detail: "\(BookText.title). Let it wash past, there's nothing to follow.", tone: .info), for: 4)
+            if book.sessionMode == .listen {
+                show(Banner(title: "Deep Listen", detail: "\(BookText.title), from where you left off. Let the words come to you.", tone: .info), for: 4)
+            } else {
+                show(Banner(title: "Lab test", detail: "\(BookText.title) at \(speedLabel(book.speed)). Let it wash past, there's nothing to follow.", tone: .info), for: 4)
+            }
         case .finished:
-            show(Banner(title: "Book feed complete", detail: "Three minutes of \(BookText.title). Stay as long as you like.", tone: .info), for: 4)
+            show(Banner(title: book.sessionMode == .listen ? "Deep Listen complete" : "Lab feed complete",
+                        detail: "A short quiz comes when you end the session. Stay as long as you like.", tone: .info), for: 4)
         case .none:
             break
         }
@@ -207,7 +216,8 @@ final class Journey: ObservableObject {
         if live.dives > divesSeen { divesSeen = live.dives; Soundscape.shared.dive() }
         Soundscape.shared.update(focus: live.F, mellow: p.mellow, deep: VoidWorld.deep(field.Z),
                                  reading: reading, fade: fade,
-                                 drive: min(1, max(0, live.travel) / 0.5), surge: live.surge, duck: book.level)
+                                 drive: min(1, max(0, live.travel) / 0.5), surge: live.surge,
+                                 duck: book.level * (book.sessionMode == .listen ? 2 : 1))
 
         // a new world
         if p.depth > level {
@@ -360,9 +370,18 @@ final class Journey: ObservableObject {
         finishedOnTime = false; fadeShown = false
         fade = 1
         summary = nil
+        quiz = nil
         clockText = ""
         Soundscape.shared.begin()
     }
+
+    /// The quiz is done: its score goes on the summary.
+    func finishQuiz(correct: Int, total: Int) {
+        summary?.quizLine = "Quiz: \(correct) of \(total) right (guessing gets about \(total / 2))"
+        quiz = nil
+    }
+
+    func skipQuiz() { quiz = nil }
 
     private func end() {
         active = nil
@@ -394,7 +413,10 @@ final class Journey: ObservableObject {
                                      pulseStart: sessionSeconds >= 60 ? pulseStart : nil,
                                      pulseEnd: sessionSeconds >= 60 ? pulseEnd : nil,
                                      dives: divesSeen,
-                                     bookSeconds: BookFeed.shared.fedSeconds, bookWords: BookFeed.shared.wordsFed)
+                                     bookSeconds: BookFeed.shared.fedSeconds, bookWords: BookFeed.shared.wordsFed,
+                                     bookMode: BookFeed.shared.sessionMode == .listen ? "Deep Listen at \(speedLabel(BookFeed.shared.speed))"
+                                         : "Lab test at \(speedLabel(BookFeed.shared.speed))")
+            if BookFeed.shared.fedSeconds >= 20 { quiz = BookQuiz.make(feed: BookFeed.shared) }
         }
         BookFeed.shared.sessionEnded()
         fade = 1

@@ -52,7 +52,7 @@ final class Soundscape {
                 drive: Double = 0, surge: Double = 0, duck: Double = 0) {
         synth.drive = max(0, min(1, drive))
         synth.surge = max(0, min(1, surge))
-        synth.duck = max(0, min(1, duck))
+        synth.duck = max(0, min(2, duck))      // up to 2 under Deep Listen, so the voice is clear
         synth.focus = max(0, min(1, focus))
         synth.mellow = max(0, min(1, mellow))
         synth.deep = max(0, min(1, deep))

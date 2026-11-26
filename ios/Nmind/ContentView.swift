@@ -4,7 +4,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.20"
+    static let version = "0.21"
 }
 
 enum Palette {
@@ -53,7 +53,8 @@ final class DrawState {
     }
 
     // the book feed's words in flight
-    private struct Flying { let word: String; let angle: Double; let born: Double; let life: Double; let mirror: Bool; let spin: Double }
+    private struct Flying { let word: String; let angle: Double; let born: Double; let life: Double; let mirror: Bool; let spin: Double; var readable = false }
+    private var spiral = 0.0
     private var flying: [Flying] = []
     private var wordAt = 0
 
@@ -65,14 +66,20 @@ final class DrawState {
         let live = engine.live
         let now = Date().timeIntervalSinceReferenceDate
         if engine.running && !engine.calibrating && book.state == .feeding {
-            let target = book.wordsFed
+            let target = book.wordIndex
             if target < wordAt || target - wordAt > 20 { wordAt = target }
             while wordAt < target && wordAt < book.words.count {
                 let w = book.words[wordAt].trimmingCharacters(in: .punctuationCharacters)
                 wordAt += 1
                 if w.isEmpty { continue }
-                flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
-                                     life: Double.random(in: 0.7...1.0), mirror: Bool.random(), spin: Double.random(in: -0.6...0.6)))
+                if book.sessionMode == .listen {
+                    // Deep Listen: upright and readable, each word on the next turn of a slow spiral
+                    spiral += 2.39996
+                    flying.append(Flying(word: w, angle: spiral, born: now, life: 1.5, mirror: false, spin: 0, readable: true))
+                } else {
+                    flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
+                                         life: Double.random(in: 0.7...1.0), mirror: Bool.random(), spin: Double.random(in: -0.6...0.6)))
+                }
             }
         }
         flying.removeAll { now - $0.born > $0.life }
@@ -80,7 +87,17 @@ final class DrawState {
         let c = CGPoint(x: size.width * live.tx, y: size.height * live.ty)
         let reach = Double(max(size.width, size.height)) * 0.75
         let level = book.level
-        for f in flying {
+        for f in flying where f.readable {
+            // drifts gently out from the centre and grows, fading in and out (no flashes)
+            let a = (now - f.born) / f.life
+            let r = 14 + reach * 0.32 * a * a
+            let alpha = 0.55 * level * sin(Double.pi * a)
+            let pt = CGPoint(x: c.x + CGFloat(cos(f.angle) * r), y: c.y + CGFloat(sin(f.angle) * r))
+            var g = ctx
+            g.opacity = alpha
+            g.draw(Text(f.word).font(.system(size: CGFloat(11 + 20 * a), weight: .regular)).foregroundColor(Palette.foam), at: pt)
+        }
+        for f in flying where !f.readable {
             let a = (now - f.born) / f.life                   // 0 to 1 over its flight
             let r = 18 + reach * a * a                          // speeds up as it nears, like the tunnel
             let alpha = 0.2 * level * sin(Double.pi * a)        // smooth rise and fall
@@ -167,6 +184,13 @@ struct ContentView: View {
                         .position(x: g.size.width / 2, y: g.size.height * 0.665)
                 }
                 .allowsHitTesting(false)
+            } else if let q = journey.quiz {
+                QuizCard(quiz: q, done: { c, t in
+                    withAnimation(.easeInOut(duration: 0.3)) { journey.finishQuiz(correct: c, total: t) }
+                }, skip: {
+                    withAnimation(.easeInOut(duration: 0.3)) { journey.skipQuiz() }
+                })
+                .transition(.opacity)
             } else if let sum = journey.summary {
                 SummaryCard(summary: sum, record: journey.record) {
                     withAnimation(.easeInOut(duration: 0.3)) { journey.summary = nil }
@@ -207,6 +231,32 @@ struct ContentView: View {
 
 // MARK: book feed
 
+/// Deep Listen's line in the message band: the words being read, in step with the voice.
+struct BookLine: View {
+    let panel: Panel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            if let line = BookFeed.shared.lineWords {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DEEP LISTEN").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.teal)
+                    (Text(line.spoken).foregroundColor(Palette.foam)
+                     + Text(line.coming.isEmpty ? "" : " " + line.coming).foregroundColor(Palette.mist.opacity(0.55)))
+                        .font(.title3)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .topLeading)
+                }
+            } else {
+                let c = panel.caption
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(c.0).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.teal)
+                    Text(c.1).font(.footnote).foregroundStyle(Palette.mist)
+                }
+            }
+        }
+    }
+}
+
 struct BookFeedPicker: View {
     @ObservedObject var book: BookFeed
 
@@ -214,13 +264,26 @@ struct BookFeedPicker: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("BOOK FEED · TEST").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.mist)
             HStack(spacing: 6) {
-                chip(book.enabled ? "On" : "Off", on: book.enabled) { book.enabled.toggle() }
-                ForEach(BookFeed.speeds, id: \.self) { v in
-                    chip("\(Int(v))x", on: book.enabled && book.speed == v) { book.speed = v; book.enabled = true }
+                ForEach(BookFeed.Mode.allCases, id: \.self) { m in
+                    chip(m.label, on: book.mode == m) { book.mode = m }
                 }
             }
-            if book.enabled {
-                Text("Once you settle, \(BookText.title) plays for 3 minutes as fast, soft speech under the music, and its words stream through the tunnel. It pauses when you look away.")
+            if book.mode == .listen {
+                HStack(spacing: 6) {
+                    ForEach(BookFeed.listenSpeeds, id: \.self) { v in
+                        chip(speedLabel(v), on: book.listenSpeed == v) { book.listenSpeed = v }
+                    }
+                }
+                Text("Once you settle, \(BookText.title) plays for 3 minutes at an easy listening speed in a clear voice, with its words in step coming through the tunnel and in the band below. It carries on where you left off, and a 10 phrase recall check follows the session.")
+                    .font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if book.mode == .lab {
+                HStack(spacing: 6) {
+                    ForEach(BookFeed.labSpeeds, id: \.self) { v in
+                        chip(speedLabel(v), on: book.labSpeed == v) { book.labSpeed = v }
+                    }
+                }
+                Text("The fast, low feed with unreadable words, for 3 minutes once you settle, from a new place in the book each time. After the session, a 20 phrase quiz (half played, half never played) checks whether anything stuck. Guessing scores about 10.")
                     .font(.caption).foregroundStyle(Palette.mist)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -454,8 +517,11 @@ struct SummaryCard: View {
                     .font(.footnote).foregroundStyle(Palette.mist)
             }
             if summary.bookSeconds > 5 {
-                Text("Book feed: \(Journey.mmss(summary.bookSeconds)) of \(BookText.title), about \(summary.bookWords) words")
+                Text("\(summary.bookMode): \(Journey.mmss(summary.bookSeconds)) of \(BookText.title), about \(summary.bookWords) words")
                     .font(.footnote).foregroundStyle(Palette.mist)
+            }
+            if let q = summary.quizLine {
+                Text(q).font(.footnote).foregroundStyle(Palette.mist)
             }
             if let a = summary.pulseStart, let b = summary.pulseEnd {
                 Text("Pulse hint \(a) → \(b)\(b < a ? ", settling as you went" : "")")
@@ -671,6 +737,8 @@ struct MessageBand: View {
                 }
             } else if !toast.isEmpty {
                 Text(toast).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.foam)
+            } else if BookFeed.shared.sessionMode == .listen && BookFeed.shared.isFeeding {
+                BookLine(panel: panel)
             } else {
                 let c = panel.caption
                 Text(c.0).font(.subheadline.weight(.semibold))
