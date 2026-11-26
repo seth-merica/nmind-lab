@@ -269,7 +269,7 @@ struct BookFeedPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("BOOK FEED · TEST").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.mist)
-            HStack(spacing: 6) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
                 ForEach(BookFeed.Mode.allCases, id: \.self) { m in
                     chip(m.label, on: book.mode == m) { book.mode = m }
                 }
@@ -297,6 +297,10 @@ struct BookFeedPicker: View {
                     .font(.caption).foregroundStyle(Palette.mist)
                     .fixedSize(horizontal: false, vertical: true)
                 ProofPanel(book: book)
+            } else if book.mode == .chapter {
+                Text("One whole chapter, \(BookFeed.chapterTitle) (about \(book.chapterRange.count) words, the book's average chapter length), in 3 minutes once you settle. The low voice reads every word and is sped up, pitch kept, to fit 3 minutes, with the music, and its words stream through the tunnel. A 20 phrase quiz follows: half from the chapter, half from chapters that didn't play.")
+                    .font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

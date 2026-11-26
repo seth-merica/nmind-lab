@@ -25,13 +25,14 @@ final class BookFeed: ObservableObject {
     private static let listenPosKey = "nmind.bookfeed.listenpos.v1", labHeardKey = "nmind.bookfeed.labheard.v1"
 
     enum Mode: String, CaseIterable {
-        case off, listen, lab, whole
+        case off, listen, lab, whole, chapter
         var label: String {
             switch self {
             case .off: return "Off"
             case .listen: return "Deep Listen"
             case .lab: return "Lab test"
             case .whole: return "Book 14x"
+            case .chapter: return "Chapter"
             }
         }
     }
@@ -58,9 +59,22 @@ final class BookFeed: ObservableObject {
         switch sessionMode == .off ? mode : sessionMode {
         case .listen: return listenSpeed
         case .whole: return BookFeed.wholeSpeed
+        case .chapter: return chapterWPS / normalWPS
         default: return labSpeed
         }
     }
+
+    // MARK: one chapter in three minutes
+    //
+    // Visions And Ideals, the chapter closest to the book's average chapter length, read in full in
+    // three minutes of feed time. The voice reads at its normal rate and the time compressor (pitch
+    // kept) is set from the voice's measured length so the whole chapter lands on three minutes.
+    static let chapterTitle = "Visions And Ideals"
+    private static let chapterRateKey = "nmind.bookfeed.chapterrate.v1"
+    private(set) var chapterRange: Range<Int> = 0..<0
+    /// words a second the chapter needs to fit in three minutes
+    var chapterWPS: Double { Double(chapterRange.count) / BookFeed.testSeconds }
+    private(set) var chapterRate: Double = { let v = UserDefaults.standard.double(forKey: "nmind.bookfeed.chapterrate.v1"); return v >= 0.5 ? v : 2.0 }()
 
     // MARK: whole book at 14x
     //
@@ -121,7 +135,15 @@ final class BookFeed: ObservableObject {
         var w: [String] = [], c: [(String, Int, Int)] = []
         // a chunk is a paragraph, or a few short ones, so speech is made a little ahead of playback
         var buf = "", first = 0
+        var headings: [(Int, String)] = []
         for p in paras {
+            let pw = p.split(whereSeparator: { $0.isWhitespace })
+            let isHeading = pw.count <= 9 && p.hasSuffix(".") && pw.allSatisfy { $0.first?.isUppercase ?? false }
+            if isHeading {
+                // a chapter always starts a new chunk, so a chapter can be read on its own
+                if !buf.isEmpty { c.append((buf, first, w.count - first)); buf = "" }
+                headings.append((w.count, p))
+            }
             if buf.isEmpty { first = w.count }
             buf += (buf.isEmpty ? "" : " ") + p
             w += p.split(whereSeparator: { $0.isWhitespace }).map(String.init)
@@ -130,6 +152,10 @@ final class BookFeed: ObservableObject {
         if !buf.isEmpty { c.append((buf, first, w.count - first)) }
         words = w
         chunks = c
+        if let i = headings.firstIndex(where: { $0.1.hasPrefix(BookFeed.chapterTitle) }) {
+            let end = i + 1 < headings.count ? headings[i + 1].0 : w.count
+            chapterRange = headings[i].0..<end
+        }
     }
 
     // MARK: session
@@ -147,6 +173,8 @@ final class BookFeed: ObservableObject {
             let n = chunks.count
             heldOut = Set([0.2, 0.4, 0.6, 0.8].map { min(n - 2, max(1, Int((Double(n) * $0).rounded()))) })
             k = 0
+        } else if mode == .chapter {
+            k = chunks.firstIndex { $0.first >= chapterRange.lowerBound } ?? 0
         } else if mode == .listen {
             let pos = UserDefaults.standard.integer(forKey: BookFeed.listenPosKey)
             k = chunks.lastIndex { $0.first <= pos } ?? 0
@@ -179,6 +207,10 @@ final class BookFeed: ObservableObject {
     var wordsFed: Int { max(0, wordIndex - startWord - (sessionMode == .whole ? heldBefore(wordIndex) : 0)) }
     /// A plain account of the 14x run, for the end card.
     var wholeReport: String? {
+        if sessionMode == .chapter && fedSeconds > 5 {
+            let wpm = Double(wordsFed) / fedSeconds * 60
+            return "\(BookFeed.chapterTitle): \(wordsFed) of \(chapterRange.count) words played in \(Journey.mmss(fedSeconds)), \(Int(wpm.rounded())) a minute (\(String(format: "%.1f", wpm / (normalWPS * 60)))x this voice's normal speed)."
+        }
         guard sessionMode == .whole, fedSeconds > 5 else { return nil }
         let wpm = Double(wordsFed) / fedSeconds * 60
         let x = wpm / (normalWPS * 60)
@@ -212,8 +244,9 @@ final class BookFeed: ObservableObject {
             fedSeconds += dt
             if let at = playedPosition() { cursor = max(cursor, at) } else { cursor += dt * wordsPerSecond }
             pump()
-            let limit = sessionMode == .whole ? BookFeed.testSeconds * 2 : BookFeed.testSeconds
-            if fedSeconds >= limit || cursor >= Double(words.count) - 1 {
+            let limit = sessionMode == .whole ? BookFeed.testSeconds * 2 : sessionMode == .chapter ? BookFeed.testSeconds * 1.25 : BookFeed.testSeconds
+            let last = sessionMode == .chapter ? chapterRange.upperBound : words.count
+            if fedSeconds >= limit || cursor >= Double(last) - 1 {
                 finishAudio(); state = .done; ev = .finished
             }
         case .paused:
@@ -252,7 +285,7 @@ final class BookFeed: ObservableObject {
 
     private func startAudio() {
         let listen = sessionMode == .listen
-        let rate = Float(sessionMode == .whole ? compress : speed)
+        let rate = Float(sessionMode == .whole ? compress : sessionMode == .chapter ? chapterRate : speed)
         sound.audioQ.async {
             self.gen += 1; self.queued = 0; self.writing = false
             self.lock.lock(); self.timeline = []; self.schedEnd = 0; self.lock.unlock()
@@ -319,7 +352,8 @@ final class BookFeed: ObservableObject {
 
     private func writeNext(gen g: Int) {
         while heldOut.contains(nextChunk) { nextChunk += 1 }
-        guard isFeeding, nextChunk < chunks.count else {
+        guard isFeeding, nextChunk < chunks.count,
+              sessionMode != .chapter || chunks[nextChunk].first < chapterRange.upperBound else {
             sound.audioQ.async { self.writing = false }
             return
         }
@@ -333,7 +367,8 @@ final class BookFeed: ObservableObject {
         u.pitchMultiplier = sessionMode == .listen ? 1.0 : 0.8   // the fast voices are low and even
         u.volume = 1
         u.preUtteranceDelay = 0; u.postUtteranceDelay = 0
-        let speed = whole ? compress : self.speed
+        let chapter = sessionMode == .chapter
+        let speed = whole ? compress : chapter ? chapterRate : self.speed
         synth.write(u) { [weak self] buffer in
             guard let self else { return }
             guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else {
@@ -345,6 +380,7 @@ final class BookFeed: ObservableObject {
                     let finished = self.timeline.filter { $0.done }
                     self.lock.unlock()
                     if whole { self.retune(finished) }
+                    if chapter { self.retuneChapter(finished) }
                 }
                 return
             }
@@ -384,6 +420,22 @@ final class BookFeed: ObservableObject {
             self.engineFactor = topWPS / self.normalWPS
             self.compress = c
             UserDefaults.standard.set(c, forKey: BookFeed.compressKey)
+        }
+    }
+
+    /// Runs on the audio queue: the voice reads the chapter at its normal rate; set the compression
+    /// from its measured length so the chapter fills three minutes.
+    private func retuneChapter(_ done: [Seg]) {
+        let words = done.reduce(0) { $0 + $1.count }, secs = done.reduce(0.0) { $0 + $1.dur }
+        guard words >= 40, secs > 1 else { return }
+        let voiceWPS = Double(words) / secs
+        let c = min(32, max(0.5, chapterWPS / voiceWPS))
+        sound.bookPitch.rate = Float(c)
+        DispatchQueue.main.async {
+            self.normalWPS = voiceWPS
+            UserDefaults.standard.set(voiceWPS, forKey: BookFeed.normalKey)
+            self.chapterRate = c
+            UserDefaults.standard.set(c, forKey: BookFeed.chapterRateKey)
         }
     }
 

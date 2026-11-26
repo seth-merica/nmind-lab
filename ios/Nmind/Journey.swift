@@ -202,13 +202,16 @@ final class Journey: ObservableObject {
         case .started:
             if book.sessionMode == .listen {
                 show(Banner(title: "Deep Listen", detail: "\(BookText.title), from where you left off. Let the words come to you.", tone: .info), for: 4)
+            } else if book.sessionMode == .chapter {
+                show(Banner(title: "Chapter", detail: "\(BookFeed.chapterTitle), the whole chapter in three minutes. Let it wash past.", tone: .info), for: 3)
             } else if book.sessionMode == .whole {
                 show(Banner(title: "Book 14x", detail: "The whole book, faster than words. Let it pour past.", tone: .info), for: 3)
             } else {
                 show(Banner(title: "Lab test", detail: "\(BookText.title) at \(speedLabel(book.speed)). Let it wash past, there's nothing to follow.", tone: .info), for: 4)
             }
         case .finished:
-            show(Banner(title: book.sessionMode == .listen ? "Deep Listen complete" : book.sessionMode == .whole ? "Book 14x complete" : "Lab feed complete",
+            show(Banner(title: book.sessionMode == .listen ? "Deep Listen complete" : book.sessionMode == .whole ? "Book 14x complete"
+                        : book.sessionMode == .chapter ? "Chapter complete" : "Lab feed complete",
                         detail: "A short quiz comes when you end the session. Stay as long as you like.", tone: .info), for: 4)
         case .none:
             break
@@ -419,6 +422,7 @@ final class Journey: ObservableObject {
                                      bookSeconds: BookFeed.shared.fedSeconds, bookWords: BookFeed.shared.wordsFed,
                                      bookMode: BookFeed.shared.sessionMode == .listen ? "Deep Listen at \(speedLabel(BookFeed.shared.speed))"
                                          : BookFeed.shared.sessionMode == .whole ? "Book 14x"
+                                         : BookFeed.shared.sessionMode == .chapter ? "Chapter in 3 minutes"
                                          : "Lab test at \(speedLabel(BookFeed.shared.speed))",
                                      bookDetail: BookFeed.shared.wholeReport)
             if BookFeed.shared.fedSeconds >= 20 { quiz = BookQuiz.make(feed: BookFeed.shared) }

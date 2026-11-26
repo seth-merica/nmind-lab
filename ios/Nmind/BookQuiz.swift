@@ -135,7 +135,7 @@ struct QuizCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(quiz.mode == .whole ? "14X QUIZ" : isLab ? "LAB QUIZ" : "RECALL CHECK")
+            Text(quiz.mode == .whole ? "14X QUIZ" : quiz.mode == .chapter ? "CHAPTER QUIZ" : isLab ? "LAB QUIZ" : "RECALL CHECK")
                 .font(.caption.weight(.semibold)).tracking(1.4).foregroundStyle(Palette.teal)
             if finished { result } else { question }
         }
