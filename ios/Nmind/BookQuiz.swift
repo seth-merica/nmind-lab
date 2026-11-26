@@ -5,7 +5,10 @@ import SwiftUI
 /// so a score well above half means something stuck.
 struct BookQuiz {
     struct Item { let phrase: String; let heard: Bool }
-    let mode: BookFeed.Mode
+    let mode: BookFeed.Choice
+    let chant: Bool
+    let clear: Bool
+    let book: String
     let speed: Double
     let seconds: Double
     let items: [Item]
@@ -14,16 +17,18 @@ struct BookQuiz {
 
     /// Builds the quiz for the session that just ended, or nil if too little played to test.
     static func make(feed: BookFeed) -> BookQuiz? {
-        let mode = feed.sessionMode
+        let mode = feed.sessionChoice
         guard mode != .off else { return nil }
         let words = feed.words
         let played = feed.playedRange
-        let half = mode == .listen ? 5 : 10
+        let clear = feed.sessionLook == .clear
+        let half = clear ? 5 : 10
         let n = phraseLength
 
         var taken: [Int] = []
         func spaced(_ i: Int) -> Bool { !taken.contains { abs($0 - i) < n + 2 } }
         func phrase(at i: Int) -> String? {
+            guard i >= 0, i + n <= words.count else { return nil }
             let raw = words[i..<(i + n)].joined(separator: " ")
             let clean = raw.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
                 .replacingOccurrences(of: "\"", with: "")
@@ -31,36 +36,32 @@ struct BookQuiz {
                 .replacingOccurrences(of: "\u{201D}", with: "")
             return clean.split(separator: " ").count >= n - 1 ? clean : nil
         }
+        func held(_ i: Int) -> Bool { feed.inHeldOut(i) || feed.inHeldOut(i + n - 1) }
 
         // from what played: skip the first few seconds, when the voice was still fading in
-        let lo = played.lowerBound + (mode == .whole ? 40 : 8), hi = played.upperBound - n
+        let lo = played.lowerBound + (clear ? 8 : 30), hi = played.upperBound - n
         guard hi - lo > n * 4 else { return nil }
-        var heardPool = Array(lo..<hi)
-        if mode == .whole { heardPool = heardPool.filter { !feed.inHeldOut($0) && !feed.inHeldOut($0 + n - 1) } }
+        let heardPool = Array(lo..<hi).filter { !held($0) }
         var heard: [Item] = []
         for i in heardPool.shuffled() where heard.count < half && spaced(i) {
             if let p = phrase(at: i) { heard.append(Item(phrase: p, heard: true)); taken.append(i) }
         }
         guard heard.count >= 2 else { return nil }
 
-        // decoys: never near this session, never from an earlier lab test, and for Deep Listen from
-        // the part of the book still ahead of you, since what's behind you was read before
+        // decoys: text that never played. First any passages held back from this run, then the part
+        // of the book still ahead, then anything no session has played, then anything not near this one.
         let near = (played.lowerBound - 300)..<(played.upperBound + 300)
-        let before = mode == .lab ? feed.labHeard : []
-        func clear(_ i: Int) -> Bool {
+        let before = feed.heard
+        func clearOf(_ i: Int) -> Bool {
             let r = i..<(i + n)
             return !near.overlaps(r) && !before.contains { $0.overlaps(r) }
         }
+        let all = Array(0..<max(0, words.count - n))
         var pools: [[Int]] = []
-        let all = Array(0..<(words.count - n))
-        if mode == .whole {
-            // the 14x run plays nearly the whole book, so decoys come only from the passages held back
-            pools.append(feed.heldOutIndices.filter { feed.inHeldOut($0 + n - 1) })
-        } else {
-            if mode == .listen { pools.append(all.filter { $0 >= near.upperBound }) }
-            pools.append(all.filter(clear))
-            pools.append(all.filter { !near.overlaps($0..<($0 + n)) })
-        }
+        if !feed.heldOut.isEmpty { pools.append(feed.heldOutIndices.filter { feed.inHeldOut($0 + n - 1) }) }
+        pools.append(all.filter { $0 >= near.upperBound && clearOf($0) })
+        pools.append(all.filter(clearOf))
+        pools.append(all.filter { !near.overlaps($0..<($0 + n)) })
         var decoys: [Item] = []
         for pool in pools where decoys.count < heard.count {
             for i in pool.shuffled() where decoys.count < heard.count && spaced(i) {
@@ -69,7 +70,8 @@ struct BookQuiz {
         }
         let k = min(heard.count, decoys.count)
         guard k >= 2 else { return nil }
-        return BookQuiz(mode: mode, speed: feed.speed, seconds: feed.fedSeconds,
+        return BookQuiz(mode: mode, chant: feed.chant != nil, clear: clear, book: feed.book.id,
+                        speed: feed.speed, seconds: feed.fedSeconds,
                         items: (Array(heard.prefix(k)) + Array(decoys.prefix(k))).shuffled())
     }
 
@@ -98,6 +100,7 @@ struct QuizRecord: Codable {
     var seconds: Double
     var correct: Int
     var total: Int
+    var book: String?
 }
 
 enum QuizLog {
@@ -131,11 +134,11 @@ struct QuizCard: View {
     @State private var finished = false
 
     private var total: Int { quiz.items.count }
-    private var isLab: Bool { quiz.mode == .lab }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(quiz.mode == .whole ? "14X QUIZ" : quiz.mode == .chapter ? "CHAPTER QUIZ" : isLab ? "LAB QUIZ" : "RECALL CHECK")
+            Text(quiz.mode == .chapter ? "CHAPTER QUIZ" : quiz.chant ? "CHANT QUIZ" : quiz.clear ? "RECALL CHECK" : "SPEED QUIZ")
                 .font(.caption.weight(.semibold)).tracking(1.4).foregroundStyle(Palette.teal)
             if finished { result } else { question }
         }
@@ -176,7 +179,7 @@ struct QuizCard: View {
                 index += 1
             } else {
                 QuizLog.add(QuizRecord(date: Date(), mode: quiz.mode.rawValue, speed: quiz.speed,
-                                       seconds: quiz.seconds, correct: correct, total: total))
+                                       seconds: quiz.seconds, correct: correct, total: total, book: quiz.book))
                 withAnimation(.easeInOut(duration: 0.3)) { finished = true }
             }
         } label: {
@@ -190,7 +193,7 @@ struct QuizCard: View {
 
     private var result: some View {
         let p = BookQuiz.chance(atLeast: correct, of: total)
-        let same = QuizLog.all().filter { $0.mode == quiz.mode.rawValue && $0.speed == quiz.speed }
+        let same = QuizLog.all().filter { $0.mode == quiz.mode.rawValue && abs($0.speed - quiz.speed) < 0.05 && ($0.book ?? BookShelf.builtInID) == quiz.book }
         let avg = same.isEmpty ? 0 : same.map { Double($0.correct) / Double(max(1, $0.total)) }.reduce(0, +) / Double(same.count)
         return VStack(alignment: .leading, spacing: 12) {
             Text("\(correct) of \(total) right")
@@ -201,7 +204,7 @@ struct QuizCard: View {
                 .font(.subheadline).foregroundStyle(p < 0.05 ? Palette.amber : Palette.foam)
                 .fixedSize(horizontal: false, vertical: true)
             if same.count > 1 {
-                Text("\(quiz.mode.label) at \(speedLabel(quiz.speed)): \(same.count) tests so far, averaging \(Int((avg * 100).rounded()))% right.")
+                Text("\(quiz.mode == .chapter ? "Chapter" : "This book") at \(speedLabel(quiz.speed)): \(same.count) tests so far, averaging \(Int((avg * 100).rounded()))% right.")
                     .font(.footnote).foregroundStyle(Palette.mist)
                     .fixedSize(horizontal: false, vertical: true)
             }

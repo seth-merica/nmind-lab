@@ -1,10 +1,11 @@
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.22"
+    static let version = "0.23"
 }
 
 enum Palette {
@@ -53,51 +54,65 @@ final class DrawState {
     }
 
     // the book feed's words in flight
-    private struct Flying { let word: String; let angle: Double; let born: Double; let life: Double; let mirror: Bool; let spin: Double; var readable = false }
+    private struct Flying { let index: Int; let word: String; let angle: Double; let born: Double; let life: Double; let mirror: Bool; let spin: Double; var readable = false }
     private var spiral = 0.0
     private var flying: [Flying] = []
     private var wordAt = 0
+    private var stamp = -1
+    private var lastBirth = 0.0
 
-    /// The book feed's words: each streams out of the far end of the tunnel along a ray, growing as it
-    /// comes at you, turned and sometimes mirrored, faint and gone in under a second, so it can't be read.
-    /// Every word fades in and out smoothly (no flashes), and at most about a fifth of full brightness.
+    /// The book feed's words, every one of them, in the book's exact order, each born just after the
+    /// one before. At easy speeds they are upright and readable on a slow spiral; faster, they stream
+    /// out of the far end of the tunnel along a ray, turned and sometimes mirrored, too quick to read.
+    /// Every word fades in and out smoothly (no flashes) and stays on screen for many frames.
     func drawBook(_ ctx: inout GraphicsContext, size: CGSize, engine: Engine) {
         let book = BookFeed.shared
         let live = engine.live
         let now = Date().timeIntervalSinceReferenceDate
         if engine.running && !engine.calibrating && book.state == .feeding {
-            let target = book.wordIndex
-            if target < wordAt || target - wordAt > 160 { wordAt = target }
-            while wordAt < target && wordAt < book.words.count {
-                let w = book.words[wordAt].trimmingCharacters(in: .punctuationCharacters)
+            if book.sessionStamp != stamp {
+                stamp = book.sessionStamp
+                wordAt = book.startWord
+                flying.removeAll()
+                lastBirth = 0
+            }
+            let target = min(book.cursor, book.words.count)
+            if target < wordAt { wordAt = target }
+            let look = book.sessionLook
+            while wordAt < target {
+                let i = wordAt
                 wordAt += 1
-                if w.isEmpty || (book.sessionMode == .whole && book.inHeldOut(wordAt - 1)) { continue }
-                if book.sessionMode == .whole {
-                    // 14x: dozens a second, turned, mirrored and gone in half a second, never readable
-                    if flying.count < 140 {
-                        flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
-                                             life: Double.random(in: 0.35...0.55), mirror: Bool.random(), spin: Double.random(in: -1.2...1.2)))
-                    }
-                } else if book.sessionMode == .listen {
-                    // Deep Listen: upright and readable, each word on the next turn of a slow spiral
+                let w = book.words[i].trimmingCharacters(in: .punctuationCharacters)
+                if w.isEmpty || !BookFeed.isWord(w) || book.inHeldOut(i) { continue }
+                // strict order: never two words born in the same instant
+                let born = max(now, lastBirth + 1.0 / 120)
+                lastBirth = born
+                switch look {
+                case .clear:
                     spiral += 2.39996
-                    flying.append(Flying(word: w, angle: spiral, born: now, life: 1.5, mirror: false, spin: 0, readable: true))
-                } else {
-                    flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
+                    flying.append(Flying(index: i, word: w, angle: spiral, born: born, life: 1.5, mirror: false, spin: 0, readable: true))
+                case .lab:
+                    flying.append(Flying(index: i, word: w, angle: Double.random(in: 0..<(2 * .pi)), born: born,
                                          life: Double.random(in: 0.7...1.0), mirror: Bool.random(), spin: Double.random(in: -0.6...0.6)))
+                case .flash:
+                    flying.append(Flying(index: i, word: w, angle: Double.random(in: 0..<(2 * .pi)), born: born,
+                                         life: Double.random(in: 0.4...0.55), mirror: Bool.random(), spin: Double.random(in: -1.2...1.2)))
                 }
             }
         }
         flying.removeAll { now - $0.born > $0.life }
         guard !flying.isEmpty else { return }
+        let feeding = book.state == .feeding
         let c = CGPoint(x: size.width * live.tx, y: size.height * live.ty)
         let reach = Double(max(size.width, size.height)) * 0.75
-        let level = book.level
+        let level = max(book.level, feeding ? 0.5 : 0)
         for f in flying where f.readable {
-            // drifts gently out from the centre and grows, fading in and out (no flashes)
             let a = (now - f.born) / f.life
+            guard a >= 0 else { continue }
+            // drifts gently out from the centre and grows, fading in and out (no flashes)
             let r = 14 + reach * 0.32 * a * a
             let alpha = 0.55 * level * sin(Double.pi * a)
+            if alpha >= 0.02 && feeding { book.markDrawn(f.index) }
             let pt = CGPoint(x: c.x + CGFloat(cos(f.angle) * r), y: c.y + CGFloat(sin(f.angle) * r))
             var g = ctx
             g.opacity = alpha
@@ -105,8 +120,10 @@ final class DrawState {
         }
         for f in flying where !f.readable {
             let a = (now - f.born) / f.life                   // 0 to 1 over its flight
+            guard a >= 0 else { continue }
             let r = 18 + reach * a * a                          // speeds up as it nears, like the tunnel
             let alpha = 0.2 * level * sin(Double.pi * a)        // smooth rise and fall
+            if alpha >= 0.02 && feeding { book.markDrawn(f.index) }
             let pt = CGPoint(x: c.x + CGFloat(cos(f.angle) * r), y: c.y + CGFloat(sin(f.angle) * r))
             var g = ctx
             g.translateBy(x: pt.x, y: pt.y)
@@ -245,7 +262,7 @@ struct BookLine: View {
         TimelineView(.periodic(from: .now, by: 0.1)) { _ in
             if let line = BookFeed.shared.lineWords {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("DEEP LISTEN").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.teal)
+                    Text("BOOK FEED").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.teal)
                     (Text(line.spoken).foregroundColor(Palette.foam)
                      + Text(line.coming.isEmpty ? "" : " " + line.coming).foregroundColor(Palette.mist.opacity(0.55)))
                         .font(.title3)
@@ -265,44 +282,127 @@ struct BookLine: View {
 
 struct BookFeedPicker: View {
     @ObservedObject var book: BookFeed
+    @State private var importing = false
+    @State private var draft: Double?
+
+    private var speed: Double { book.choice == .e ? (draft ?? book.customSpeed) : book.speed }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("BOOK FEED · TEST").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.mist)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-                ForEach(BookFeed.Mode.allCases, id: \.self) { m in
-                    chip(m.label, on: book.mode == m) { book.mode = m }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+                ForEach(BookFeed.Choice.allCases, id: \.self) { c in
+                    chip(c == .e ? "E \(speedLabel(book.customSpeed))" : c.label, on: book.choice == c) {
+                        book.choice = c; draft = nil
+                    }
                 }
             }
-            if book.mode == .listen {
+            if book.choice != .off {
+                shelf
+                if book.choice == .e { custom }
+                Text(detail)
+                    .font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+                ProofPanel(book: book, speed: speed)
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.epub, .pdf, .plainText, .text]) { result in
+            if case .success(let url) = result { book.importBook(from: url) }
+        }
+        .onAppear { book.measureIfNeeded() }
+    }
+
+    /// The books on this phone, and loading another from Files.
+    private var shelf: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(BookFeed.listenSpeeds, id: \.self) { v in
-                        chip(speedLabel(v), on: book.listenSpeed == v) { book.listenSpeed = v }
+                    pill(BookText.title, on: book.book.id == BookShelf.builtInID) { book.select(BookShelf.builtInID) }
+                    ForEach(book.shelf) { e in
+                        pill(e.title, on: book.book.id == e.id) { book.select(e.id) }
                     }
                 }
-                Text("Once you settle, \(BookText.title) plays for 3 minutes at an easy listening speed in a clear voice, with its words in step coming through the tunnel and in the band below. It carries on where you left off, and a 10 phrase recall check follows the session.")
-                    .font(.caption).foregroundStyle(Palette.mist)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if book.mode == .lab {
-                HStack(spacing: 6) {
-                    ForEach(BookFeed.labSpeeds, id: \.self) { v in
-                        chip(speedLabel(v), on: book.labSpeed == v) { book.labSpeed = v }
+            }
+            Text("\(book.book.credit) · \(book.book.words.count.formatted()) words · the whole book is about \(minutes(book.bookMinutes(at: max(1, speed)))) at \(speedLabel(speed))")
+                .font(.caption2).foregroundStyle(Palette.mist)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button(action: { importing = true }) {
+                    Text(book.loading ? "Reading the book..." : "Load your own book")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Palette.foam)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .overlay(Capsule().stroke(Palette.teal, lineWidth: 1))
+                }
+                .disabled(book.loading || book.isFeeding)
+                if book.book.id != BookShelf.builtInID {
+                    Button(action: { book.removeCurrent() }) {
+                        Text("Remove")
+                            .font(.footnote).foregroundStyle(Palette.mist)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .overlay(Capsule().stroke(Palette.current, lineWidth: 1))
                     }
                 }
-                Text("The fast, low feed with unreadable words, for 3 minutes once you settle, from a new place in the book each time. After the session, a 20 phrase quiz (half played, half never played) checks whether anything stuck. Guessing scores about 10.")
-                    .font(.caption).foregroundStyle(Palette.mist)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if book.mode == .whole {
-                Text("The whole book at 14 times normal speaking speed, every word spoken by the voice, with the music, and its words streaming through the tunnel too fast to read. Four short passages are held back so the 20 phrase quiz after the session has text you never heard. The end card shows the words played and the real speed.")
-                    .font(.caption).foregroundStyle(Palette.mist)
-                    .fixedSize(horizontal: false, vertical: true)
-                ProofPanel(book: book)
-            } else if book.mode == .chapter {
-                Text("One whole chapter, \(BookFeed.chapterTitle) (about \(book.chapterRange.count) words, the book's average chapter length), in 3 minutes once you settle. The low voice reads every word and is sped up, pitch kept, to fit 3 minutes, with the music, and its words stream through the tunnel. A 20 phrase quiz follows: half from the chapter, half from chapters that didn't play.")
-                    .font(.caption).foregroundStyle(Palette.mist)
+            }
+            if let m = book.loadMessage {
+                Text(m).font(.caption).foregroundStyle(book.loadFailed ? Palette.alert : Palette.teal)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// E: pick any speed up to 20x, hear it, then save it.
+    private var custom: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Speed \(speedLabel(draft ?? book.customSpeed))")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Palette.foam)
+                Spacer()
+                if let d = draft, d != book.customSpeed {
+                    Button(action: { book.setCustom(d); draft = nil }) {
+                        Text("Save \(speedLabel(d))")
+                            .font(.footnote.weight(.semibold)).foregroundStyle(Palette.bg)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(Capsule().fill(Palette.teal))
+                    }
+                } else {
+                    Text("Saved").font(.caption).foregroundStyle(Palette.mist)
+                }
+            }
+            Slider(value: Binding(get: { draft ?? book.customSpeed }, set: { draft = ($0 * 2).rounded() / 2 }),
+                   in: 1...BookFeed.maxSpeed, step: 0.5,
+                   onEditingChanged: { editing in
+                       if !editing, let d = draft { book.runSample(speed: d) }
+                   })
+                .tint(Palette.teal)
+            Text("Let go of the slider to hear a sample at that speed, then save it.")
+                .font(.caption2).foregroundStyle(Palette.mist)
+        }
+    }
+
+    private var detail: String {
+        let s = speed
+        if book.choice == .chapter {
+            guard let ch = book.book.chapter else { return "This book is too short for the chapter option." }
+            return "One whole chapter, \(ch.title) (\(ch.range.count.formatted()) words, the closest to this book's average chapter), in 3 minutes once you settle, which is \(speedLabel((s * 10).rounded() / 10)). \(how(s)) A 20 phrase quiz follows: half from the chapter, half from parts that didn't play."
+        }
+        if book.isChant(s) {
+            return "3 minutes once you settle, carrying on where you left off. \(how(s)) A 20 phrase quiz follows. Guessing scores about 10."
+        }
+        return "3 minutes once you settle, carrying on where you left off. \(how(s)) A \(BookFeed.look(for: s) == .clear ? 10 : 20) phrase recall check follows."
+    }
+
+    private func how(_ s: Double) -> String {
+        if book.isChant(s) {
+            return "Faster than one voice can speak, so the book becomes a low chant: each word spoken whole by the low voice at its own top speed, pitch kept, starting one after another in the book's exact order and overlapping like monks in a round, under the music. Every word is drawn in the tunnel in the same order."
+        }
+        if BookFeed.look(for: s) == .clear {
+            return "One clear low voice reads every word, with the words drawn readable in the tunnel and the band below."
+        }
+        return "One low voice reads every word at its own speed, pitch kept, with the words streaming through the tunnel."
+    }
+
+    private func minutes(_ m: Double) -> String {
+        m >= 90 ? String(format: "%.1f hours", m / 60) : "\(Int(m.rounded())) min"
     }
 
     private func chip(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
@@ -315,12 +415,26 @@ struct BookFeedPicker: View {
                 .background(Capsule().fill(on ? Palette.teal : Palette.current.opacity(0.45)))
         }
     }
+
+    private func pill(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(on ? .semibold : .regular))
+                .foregroundStyle(on ? Palette.bg : Palette.foam)
+                .lineLimit(1)
+                .frame(maxWidth: 200)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(on ? Palette.teal : Palette.current.opacity(0.45)))
+        }
+        .disabled(book.isFeeding)
+    }
 }
 
-/// Hear for yourself that the 14x feed is the real voice: one sentence at full speed, then the same
-/// recording uncompressed, then the same sentence at normal speed, with the measured numbers.
+/// Hear it before a session: a sample at the chosen speed, and for chant speeds the proof (one word
+/// voice alone at its speed, then the same sentence at normal speed), with the measured numbers.
 struct ProofPanel: View {
     @ObservedObject var book: BookFeed
+    let speed: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -328,13 +442,14 @@ struct ProofPanel: View {
                 Text(stage).font(.footnote.weight(.semibold)).foregroundStyle(Palette.teal)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(book.proofText).font(.footnote).foregroundStyle(Palette.foam)
+                    .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Button(action: { book.runProof() }) {
-                    Text("Hear the proof")
-                        .font(.footnote.weight(.semibold)).foregroundStyle(Palette.foam)
-                        .frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .overlay(Capsule().stroke(Palette.teal, lineWidth: 1))
+                HStack(spacing: 8) {
+                    button("Hear a sample") { book.runSample(speed: speed) }
+                    if book.isChant(speed) {
+                        button("Hear the proof") { book.runProof(speed: speed) }
+                    }
                 }
             }
             if !book.proofNumbers.isEmpty {
@@ -343,6 +458,16 @@ struct ProofPanel: View {
             }
         }
         .padding(.top, 2)
+    }
+
+    private func button(_ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.footnote.weight(.semibold)).foregroundStyle(Palette.foam)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                .overlay(Capsule().stroke(Palette.teal, lineWidth: 1))
+        }
+        .disabled(book.isFeeding || book.loading)
     }
 }
 
@@ -561,7 +686,7 @@ struct SummaryCard: View {
                     .font(.footnote).foregroundStyle(Palette.mist)
             }
             if summary.bookSeconds > 5 {
-                Text("\(summary.bookMode): \(Journey.mmss(summary.bookSeconds)) of \(BookText.title), about \(summary.bookWords) words")
+                Text("\(summary.bookMode): \(Journey.mmss(summary.bookSeconds)) of \(summary.bookTitle.isEmpty ? BookText.title : summary.bookTitle), about \(summary.bookWords) words")
                     .font(.footnote).foregroundStyle(Palette.mist)
             }
             if let d = summary.bookDetail {
@@ -785,7 +910,7 @@ struct MessageBand: View {
                 }
             } else if !toast.isEmpty {
                 Text(toast).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.foam)
-            } else if BookFeed.shared.sessionMode == .listen && BookFeed.shared.isFeeding {
+            } else if BookFeed.shared.sessionLook == .clear && BookFeed.shared.chant == nil && BookFeed.shared.isFeeding {
                 BookLine(panel: panel)
             } else {
                 let c = panel.caption

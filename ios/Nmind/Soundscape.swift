@@ -14,10 +14,14 @@ final class Soundscape {
 
     let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?
-    // the book feed's chain: speech buffers, sped up without raising the pitch, then softened
-    let bookPlayer = AVAudioPlayerNode()
-    let bookPitch = AVAudioUnitTimePitch()
+    // the book feed's chain: up to twelve voices, each on its own player and place in the stereo
+    // field, mixed together, softened and given a little room for the chant
+    static let maxVoices = 12
+    let bookPlayers: [AVAudioPlayerNode] = (0..<12).map { _ in AVAudioPlayerNode() }
+    var bookPlayer: AVAudioPlayerNode { bookPlayers[0] }
+    let bookBus = AVAudioMixerNode()
     let bookEQ = AVAudioUnitEQ(numberOfBands: 1)
+    let bookReverb = AVAudioUnitReverb()
     static let bookFormat = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
     private let synth = Synth()
     private var stopWork: DispatchWorkItem?
@@ -75,6 +79,13 @@ final class Soundscape {
     /// Your eyes took the wheel: one soft note.
     func steer() { synth.steerCount &+= 1 }
 
+    /// Runs on `audioQ`: the book's voices either plain and clear, or as a chant: a light low-pass
+    /// and a touch of a large room, so many voices blend into one low murmur.
+    func styleBook(chant: Bool) {
+        bookEQ.bands[0].bypass = !chant
+        bookReverb.wetDryMix = chant ? 30 : 0
+    }
+
     /// Wake the audio without starting a dive (for the book feed proof on the start screen).
     func wake() {
         stopWork?.cancel()
@@ -127,13 +138,21 @@ final class Soundscape {
             let bf = Soundscape.bookFormat
             let band = bookEQ.bands[0]
             band.filterType = .lowPass
-            band.frequency = 3_400
-            band.bypass = false
-            engine.attach(bookPlayer); engine.attach(bookPitch); engine.attach(bookEQ)
-            engine.connect(bookPlayer, to: bookPitch, format: bf)
-            engine.connect(bookPitch, to: bookEQ, format: bf)
-            engine.connect(bookEQ, to: engine.mainMixerNode, format: bf)
-            bookPlayer.volume = 0
+            band.frequency = 3_200
+            band.bypass = true
+            bookReverb.loadFactoryPreset(.cathedral)
+            bookReverb.wetDryMix = 0
+            engine.attach(bookBus); engine.attach(bookEQ); engine.attach(bookReverb)
+            for (i, p) in bookPlayers.enumerated() {
+                engine.attach(p)
+                engine.connect(p, to: bookBus, fromBus: 0, toBus: i, format: bf)
+                p.volume = 0
+            }
+            if let stereo = AVAudioFormat(standardFormatWithSampleRate: bf.sampleRate, channels: 2) {
+                engine.connect(bookBus, to: bookEQ, format: stereo)
+                engine.connect(bookEQ, to: bookReverb, format: stereo)
+                engine.connect(bookReverb, to: engine.mainMixerNode, format: stereo)
+            }
         }
         if !engine.isRunning {
             engine.prepare()
