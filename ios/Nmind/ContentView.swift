@@ -4,7 +4,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.19"
+    static let version = "0.20"
 }
 
 enum Palette {
@@ -52,6 +52,49 @@ final class DrawState {
         return field.update(date: date, live: live, running: running, alpha: alpha, sat: sat, reduce: reduce)
     }
 
+    // the book feed's words in flight
+    private struct Flying { let word: String; let angle: Double; let born: Double; let life: Double; let mirror: Bool; let spin: Double }
+    private var flying: [Flying] = []
+    private var wordAt = 0
+
+    /// The book feed's words: each streams out of the far end of the tunnel along a ray, growing as it
+    /// comes at you, turned and sometimes mirrored, faint and gone in under a second, so it can't be read.
+    /// Every word fades in and out smoothly (no flashes), and at most about a fifth of full brightness.
+    func drawBook(_ ctx: inout GraphicsContext, size: CGSize, engine: Engine) {
+        let book = BookFeed.shared
+        let live = engine.live
+        let now = Date().timeIntervalSinceReferenceDate
+        if engine.running && !engine.calibrating && book.state == .feeding {
+            let target = book.wordsFed
+            if target < wordAt || target - wordAt > 20 { wordAt = target }
+            while wordAt < target && wordAt < book.words.count {
+                let w = book.words[wordAt].trimmingCharacters(in: .punctuationCharacters)
+                wordAt += 1
+                if w.isEmpty { continue }
+                flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
+                                     life: Double.random(in: 0.7...1.0), mirror: Bool.random(), spin: Double.random(in: -0.6...0.6)))
+            }
+        }
+        flying.removeAll { now - $0.born > $0.life }
+        guard !flying.isEmpty else { return }
+        let c = CGPoint(x: size.width * live.tx, y: size.height * live.ty)
+        let reach = Double(max(size.width, size.height)) * 0.75
+        let level = book.level
+        for f in flying {
+            let a = (now - f.born) / f.life                   // 0 to 1 over its flight
+            let r = 18 + reach * a * a                          // speeds up as it nears, like the tunnel
+            let alpha = 0.2 * level * sin(Double.pi * a)        // smooth rise and fall
+            let pt = CGPoint(x: c.x + CGFloat(cos(f.angle) * r), y: c.y + CGFloat(sin(f.angle) * r))
+            var g = ctx
+            g.translateBy(x: pt.x, y: pt.y)
+            g.rotate(by: .radians(f.angle + .pi / 2 + f.spin))
+            if f.mirror { g.scaleBy(x: -1, y: 1) }
+            g.opacity = alpha
+            let pts = CGFloat(7 + 22 * a)
+            g.draw(Text(f.word).font(.system(size: pts, weight: .light)).foregroundColor(Palette.foam), at: .zero)
+        }
+    }
+
     /// Centre target with a focus meter around it, drawn over the void.
     func drawMeter(_ ctx: inout GraphicsContext, size: CGSize, engine: Engine) {
         let live = engine.live
@@ -93,6 +136,7 @@ struct ContentView: View {
                             .fill(Palette.bg)
                             .colorEffect(u.shader(size: geo.size))
                         Canvas { ctx, size in
+                            drawState.drawBook(&ctx, size: size, engine: engine)
                             drawState.drawMeter(&ctx, size: size, engine: engine)
                         }
                     }
@@ -157,6 +201,40 @@ struct ContentView: View {
         withAnimation(.easeInOut(duration: 0.3)) { toast = text }
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
             withAnimation(.easeInOut(duration: 0.4)) { if toast == text { toast = "" } }
+        }
+    }
+}
+
+// MARK: book feed
+
+struct BookFeedPicker: View {
+    @ObservedObject var book: BookFeed
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("BOOK FEED · TEST").font(.caption2.weight(.semibold)).tracking(1.2).foregroundStyle(Palette.mist)
+            HStack(spacing: 6) {
+                chip(book.enabled ? "On" : "Off", on: book.enabled) { book.enabled.toggle() }
+                ForEach(BookFeed.speeds, id: \.self) { v in
+                    chip("\(Int(v))x", on: book.enabled && book.speed == v) { book.speed = v; book.enabled = true }
+                }
+            }
+            if book.enabled {
+                Text("Once you settle, \(BookText.title) plays for 3 minutes as fast, soft speech under the music, and its words stream through the tunnel. It pauses when you look away.")
+                    .font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func chip(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.footnote.weight(on ? .semibold : .regular))
+                .foregroundStyle(on ? Palette.bg : Palette.foam)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                .background(Capsule().fill(on ? Palette.teal : Palette.current.opacity(0.45)))
         }
     }
 }
@@ -246,7 +324,8 @@ struct IntroCard: View {
                 bullet("The first time, a dot walks your eyes around the screen for about 15 seconds. It's saved, so you do it once. Redo it below if tracking feels off or you switch to glasses.")
                 bullet("The first 20 seconds of a dive learn your resting face. Tap the screen to set the center right away.")
                 bullet("Follow the light as it drifts. Once you hold focus, it goes where you look and the tunnel follows. While you steer, tap a spot you are looking at to line it up.")
-                bullet("Sound follows you: it fills out as you focus and shimmers when you're mellow. A timed session fades out and ends on a soft bell.")
+                bullet("Hold a mellow calm and the void pulls you into a dive every 10 to 20 seconds: the tunnel speeds up, the pulse deepens and the air rushes past. The deeper your streak, the sooner and longer they come.")
+                bullet("Sound follows you: it fills out as you focus and shimmers when you're mellow. A timed session fades out and ends on a soft bell. Turn your volume up.")
                 bullet("The pulse reading is a hint and needs light on your face.")
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -277,6 +356,7 @@ struct IntroCard: View {
                 }
             }
             .padding(.top, 2)
+            BookFeedPicker(book: BookFeed.shared)
             Button(action: { engine.start() }) {
                 Text("Start")
                     .font(.headline)
@@ -368,6 +448,14 @@ struct SummaryCard: View {
                 tile(Journey.mmss(summary.longestMellow), "calmest stretch")
                 tile("World \(summary.world + 1)", VoidWorld.name(summary.world).lowercased())
                 tile("\(summary.cleared)", summary.cleared == 1 ? "challenge cleared" : "challenges cleared")
+            }
+            if summary.dives > 0 {
+                Text("\(summary.dives) dive\(summary.dives == 1 ? "" : "s") into the void")
+                    .font(.footnote).foregroundStyle(Palette.mist)
+            }
+            if summary.bookSeconds > 5 {
+                Text("Book feed: \(Journey.mmss(summary.bookSeconds)) of \(BookText.title), about \(summary.bookWords) words")
+                    .font(.footnote).foregroundStyle(Palette.mist)
             }
             if let a = summary.pulseStart, let b = summary.pulseEnd {
                 Text("Pulse hint \(a) → \(b)\(b < a ? ", settling as you went" : "")")

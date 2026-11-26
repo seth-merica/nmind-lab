@@ -30,6 +30,9 @@ struct Live {
     var ty = Engine.homeY
     /// true while your eyes steer the centre
     var steering = false
+    /// a dive in progress (0 to 1) and how many have come this session
+    var surge = 0.0
+    var dives = 0
 }
 
 /// What the readout and captions show, refreshed four times a second.
@@ -90,6 +93,9 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private var lastHit: SIMD2<Double>?
     private var hrStart = 0.0
     private var boostUntil = 0.0
+    // Dives: held calm charges up a dive every 9 to 20 seconds; the deeper your streak, the sooner
+    // and longer they come. Tension or looking away drains the charge.
+    private var surgeCharge = 0.0, surgeUntil = 0.0, surgeV = 0.0, dives = 0
 
     // The wandering target. It drifts slowly around the screen once the resting face is learned,
     // and the tunnel bends to follow it. The gaze is compared with where the target is now, and
@@ -160,7 +166,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             self.lidS = 0; self.lidSeeded = false; self.lidHoldUntil = 0
             self.lastT = 0; self.startT = 0; self.seenT = 0; self.secondT = 0; self.awayT = 0
             self.mode = .noFace; self.eyeH = []; self.headH = []; self.lookH = []
-            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = saved.map { (0.0, $0.gDown, $0.gRight, 0.0) } ?? (0.0, 1.0, 1.0, 0.0); self.steering = false; self.steerMix = 0; self.learnT = 0; self.steerHold = 0; self.lowT = 0; self.offT = 0; self.steerSeeded = false; self.steerBuf = []; self.steerJump = false; self.taps = []; self.tapAsked = nil; self.tuned = 0; self.hrStart = 0; self.boostUntil = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
+            self.center = nil; self.lastHit = nil; self.wanderPhase = 0; self.wanderAmp = 0; self.tx = 0.5; self.ty = Engine.homeY; self.gazeMap = saved.map { (0.0, $0.gDown, $0.gRight, 0.0) } ?? (0.0, 1.0, 1.0, 0.0); self.steering = false; self.steerMix = 0; self.learnT = 0; self.steerHold = 0; self.lowT = 0; self.offT = 0; self.steerSeeded = false; self.steerBuf = []; self.steerJump = false; self.taps = []; self.tapAsked = nil; self.tuned = 0; self.hrStart = 0; self.boostUntil = 0; self.surgeCharge = 0; self.surgeUntil = 0; self.surgeV = 0; self.dives = 0; self.phoneMove = 0; self.s2Held = 0.6; self.lock = 0; self.F = 0.3; self.Z = 0; self.travel = 0; self.mellowV = 0; self.streak = 0
             self.calm.reset(0)
         }
         if motionMgr.isDeviceMotionAvailable {
@@ -203,7 +209,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
         center = nil; eyeH = []; headH = []; lookH = []
         wanderPhase = 0; wanderAmp = 0; tx = 0.5; ty = Engine.homeY
         steering = false; steerMix = 0; learnT = 0; steerHold = 0; lowT = 0; offT = 0; steerSeeded = false; steerBuf = []
-        taps = []; tuned = 0; hrStart = 0; lock = 0; F = 0.3; Z = 0; travel = 0; mellowV = 0; streak = 0
+        taps = []; tuned = 0; hrStart = 0; surgeCharge = 0; surgeUntil = 0; surgeV = 0; dives = 0; lock = 0; F = 0.3; Z = 0; travel = 0; mellowV = 0; streak = 0
         gazeMap = cal.map { (0.0, $0.gDown, $0.gRight, 0.0) } ?? (0.0, 1.0, 1.0, 0.0)
     }
 
@@ -554,14 +560,28 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
             streak = min(streak, 120)
             let momentum = 1 + min(1.8, streak / 40)
             switch o.verdict {
-            case .mellow: target = 0.16 * momentum * ready * (0.6 + 0.4 * o.mellow) * clamp(1 - 2 * (o.tension - 0.15), 0, 1)
-            case .settling: target = 0.04 * ready * (1 + 0.5 * (momentum - 1))
+            case .mellow: target = 0.22 * momentum * ready * (0.6 + 0.4 * o.mellow) * clamp(1 - 2 * (o.tension - 0.15), 0, 1)
+            case .settling: target = 0.07 * ready * (1 + 0.5 * (momentum - 1))
             case .tense: target = 0
             case .restless: target = -0.05
             default: target = 0.02 * ready
             }
         }
         if mode == .reading && t < boostUntil { target += 0.22 }
+
+        // dives
+        let calmNow = mode == .reading && F > 0.5 && (o.verdict == .mellow || o.verdict == .settling)
+        if calmNow { surgeCharge += dt * (o.verdict == .mellow ? 1.0 : 0.6) }
+        else if mode != .reading || o.verdict == .tense || o.verdict == .restless { surgeCharge = max(0, surgeCharge - dt * 2) }
+        let every = max(9, 20 - streak / 8)
+        if t >= surgeUntil && surgeCharge > every {
+            surgeUntil = t + 10 + min(8, streak / 10)
+            surgeCharge = 0
+            dives += 1
+        }
+        let surging = t < surgeUntil && mode == .reading && o.verdict != .restless
+        surgeV += ((surging ? 1.0 : 0.0) - surgeV) * min(1, dt / (surging ? 1.2 : 2.0))
+        target += 0.3 * surgeV
         travel += (target - travel) * min(1, dt / 2.5)
         Z = max(0, Z + travel * dt)
     }
@@ -569,7 +589,7 @@ final class Engine: NSObject, ObservableObject, ARSessionDelegate {
     private func publish(_ t: Double) {
         let o = calm.out
         let snap = Live(F: F, Z: Z, travel: travel, mellow: mellowV, mode: mode, verdict: o.verdict, learnLeft: o.learnLeft,
-                        hr: o.hr, hrConf: o.hrConf, tx: tx, ty: ty, steering: steering)
+                        hr: o.hr, hrConf: o.hrConf, tx: tx, ty: ty, steering: steering, surge: surgeV, dives: dives)
         var p: Panel?
         if o.hrConf > 0.15 && o.hr > 35 && o.hr < 180 {
             if hrStart == 0 { hrStart = o.hr }

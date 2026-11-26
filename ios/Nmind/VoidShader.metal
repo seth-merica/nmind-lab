@@ -14,7 +14,7 @@ using namespace metal;
 // eye and fade into fog, and the light at the end sits on the target.
 //
 // Safety: the app eases every input over a second or more and caps `flow` so each rib passes
-// a point under two times a second. The heartbeat swell (one per beat, 35 to 180 a minute, so
+// a point at most 2.3 times a second (under the 3 a second limit). The heartbeat swell (one per beat, 35 to 180 a minute, so
 // under 3 a second) lifts brightness by at most about 22 percent, and the ripple is a moving ring.
 
 static float3 pal(float t) {

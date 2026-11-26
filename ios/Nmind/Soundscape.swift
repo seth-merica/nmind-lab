@@ -12,13 +12,18 @@ final class Soundscape {
     static let shared = Soundscape()
     private static let key = "nmind.sound.v1"
 
-    private let engine = AVAudioEngine()
+    let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?
+    // the book feed's chain: speech buffers, sped up without raising the pitch, then softened
+    let bookPlayer = AVAudioPlayerNode()
+    let bookPitch = AVAudioUnitTimePitch()
+    let bookEQ = AVAudioUnitEQ(numberOfBands: 1)
+    static let bookFormat = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
     private let synth = Synth()
     private var stopWork: DispatchWorkItem?
     /// The audio session and engine are started and stopped here, off the main thread, so a slow
     /// audio route can never freeze the screen.
-    private let audioQ = DispatchQueue(label: "nmind.audio", qos: .userInitiated)
+    let audioQ = DispatchQueue(label: "nmind.audio", qos: .userInitiated)
     private(set) var enabled: Bool
 
     private init() {
@@ -43,7 +48,11 @@ final class Soundscape {
     }
 
     /// Called about four times a second with the live readings.
-    func update(focus: Double, mellow: Double, deep: Double, reading: Bool, fade: Double) {
+    func update(focus: Double, mellow: Double, deep: Double, reading: Bool, fade: Double,
+                drive: Double = 0, surge: Double = 0, duck: Double = 0) {
+        synth.drive = max(0, min(1, drive))
+        synth.surge = max(0, min(1, surge))
+        synth.duck = max(0, min(1, duck))
         synth.focus = max(0, min(1, focus))
         synth.mellow = max(0, min(1, mellow))
         synth.deep = max(0, min(1, deep))
@@ -59,6 +68,9 @@ final class Soundscape {
 
     /// A challenge cleared: a rising chime.
     func cleared() { synth.clearCount &+= 1 }
+
+    /// A dive: the bass rises and a swell of air rushes past.
+    func dive() { synth.diveCount &+= 1 }
 
     /// Your eyes took the wheel: one soft note.
     func steer() { synth.steerCount &+= 1 }
@@ -94,6 +106,16 @@ final class Soundscape {
             engine.connect(n, to: engine.mainMixerNode, format: fmt)
             engine.mainMixerNode.outputVolume = 1
             node = n
+            let bf = Soundscape.bookFormat
+            let band = bookEQ.bands[0]
+            band.filterType = .lowPass
+            band.frequency = 3_400
+            band.bypass = false
+            engine.attach(bookPlayer); engine.attach(bookPitch); engine.attach(bookEQ)
+            engine.connect(bookPlayer, to: bookPitch, format: bf)
+            engine.connect(bookPitch, to: bookEQ, format: bf)
+            engine.connect(bookEQ, to: engine.mainMixerNode, format: bf)
+            bookPlayer.volume = 0
         }
         if !engine.isRunning {
             engine.prepare()
@@ -108,13 +130,20 @@ final class Synth {
     // written by the main thread
     var enabled = 1.0, running = 0.0, reading = 0.0, fade = 1.0
     var focus = 0.3, mellow = 0.0, deep = 0.0
+    /// how fast you travel (0 to 1), whether a dive is on (0 to 1), and how much to make room for the book's voice
+    var drive = 0.0, surge = 0.0, duck = 0.0
     var rootHz = 73.42
-    var bloomCount = 0, clearCount = 0, steerCount = 0, endCount = 0
+    var bloomCount = 0, clearCount = 0, steerCount = 0, endCount = 0, diveCount = 0
 
     // audio thread state
     private(set) var sr = 48_000.0
-    private var seenBloom = 0, seenClear = 0, seenSteer = 0, seenEnd = 0
+    private var seenBloom = 0, seenClear = 0, seenSteer = 0, seenEnd = 0, seenDive = 0
     private var gain = 0.0, f = 0.3, m = 0.0, d = 0.0, root = 73.42
+    private var dr = 0.0, sg = 0.0, dk = 0.0, bright = 0.3
+    // the pulse: a soft double beat, like a heart, that quickens and deepens as you dive
+    private var pulsePh = 0.0, kickT = 10.0, kickA = 0.0, kickPh = 0.0, clickN = 0.0
+    // the rush of air as you travel
+    private var windLP = 0.0, windBP = 0.0, windSwell = 0.0
     private var t = 0.0
     private var rng: UInt64 = 0x9E37_79B9_7F4A_7C15
 
@@ -173,18 +202,23 @@ final class Synth {
         f += (focus - f) * k
         m += (mellow - m) * k
         d += (deep - d) * k
+        dr += (drive - dr) * (1 - exp(-dt / 0.8))
+        sg += (surge - sg) * (1 - exp(-dt / 0.6))
+        dk += (duck - dk) * (1 - exp(-dt / 1.0))
+        bright = 0.25 + 0.4 * f + 0.45 * dr + 0.25 * sg
+        windSwell *= exp(-dt / 2.5)
         root += (rootHz - root) * (1 - exp(-dt / 4))
 
         // the upper voices only open up as focus grows (no arrays made here: this runs on the audio thread)
         for i in 0..<voices {
             let base: Double
             switch i {
-            case 0: base = 0.16
-            case 1: base = 0.30
-            case 2: base = 0.22
-            case 3: base = 0.16 * (0.35 + 0.65 * f)
-            case 4: base = 0.11 * f
-            default: base = 0.07 * f * (0.3 + 0.7 * m) * (0.5 + 0.5 * d)
+            case 0: base = 0.20 + 0.10 * dr
+            case 1: base = 0.32 + 0.08 * dr
+            case 2: base = 0.24
+            case 3: base = 0.18 * (0.35 + 0.65 * f) + 0.06 * sg
+            case 4: base = 0.13 * f + 0.06 * dr
+            default: base = 0.09 * f * (0.3 + 0.7 * m) * (0.5 + 0.5 * d) + 0.05 * sg
             }
             let lfo = 0.72 + 0.28 * sin(2 * .pi * t / Synth.lfoPeriods[i] + Double(i) * 1.7)
             amp[i] = base * lfo
@@ -212,6 +246,14 @@ final class Synth {
         if steerCount != seenSteer {
             seenSteer = steerCount
             if on { ring(r4 * 3.0 / 2, 0.045, tau: 2.0, pan: 0.5) }
+        }
+        if diveCount != seenDive {
+            seenDive = diveCount
+            if on {
+                windSwell = 1
+                ring(r4 * 2, 0.05, tau: 3.0, pan: 0.4)
+                ring(r4 * 3, 0.04, tau: 3.5, delay: 0.25, pan: 0.6)
+            }
         }
         if endCount != seenEnd {
             seenEnd = endCount
@@ -253,10 +295,40 @@ final class Synth {
                     phB[v] += twoPi * fr * 0.9988 * inv
                     if phA[v] > twoPi { phA[v] -= twoPi }
                     if phB[v] > twoPi { phB[v] -= twoPi }
-                    let a = sin(phA[v]), b = sin(phB[v])
+                    // add the 2nd and 3rd harmonics (from the sine and cosine, no extra oscillators) so the
+                    // low notes are heard on a phone speaker, which can't play the fundamentals
+                    let sa = sin(phA[v]), ca = cos(phA[v]), sb = sin(phB[v]), cb = cos(phB[v])
+                    let h2 = bright * (v < 3 ? 0.6 : 0.35), h3 = bright * (v < 3 ? 0.4 : 0.2)
+                    let a = sa + h2 * 2 * sa * ca + h3 * (3 * sa - 4 * sa * sa * sa)
+                    let b = sb + h2 * 2 * sb * cb + h3 * (3 * sb - 4 * sb * sb * sb)
                     l += amp[v] * (0.65 * a + 0.35 * b)
                     r += amp[v] * (0.35 * a + 0.65 * b)
                 }
+                l *= 1 - 0.3 * dk; r *= 1 - 0.3 * dk
+
+                // the pulse: from 52 beats a minute at rest to about 92 deep in a dive
+                let bpm = 52 + 28 * dr + 12 * sg
+                pulsePh += bpm / 60 * inv
+                if pulsePh >= 1 { pulsePh -= 1; kickT = 0; kickA = 1 }
+                if kickT < 0.29 && kickT + inv >= 0.29 { kickT = 0.29; kickA = 0.62 }  // the second, softer beat
+                kickT += inv
+                let kt = kickT >= 0.29 ? kickT - 0.29 : kickT
+                let kf = 46 + 80 * exp(-kt / 0.045)
+                kickPh += twoPi * kf * inv
+                if kickPh > twoPi { kickPh -= twoPi }
+                let kenv = kickA * exp(-kt / 0.2)
+                let ks = sin(kickPh), kc = cos(kickPh)
+                clickN += (rand() * 2 - 1 - clickN) * 0.3
+                let kick = kenv * (ks + 0.7 * 2 * ks * kc + 0.45 * (3 * ks - 4 * ks * ks * ks)) + kickA * 0.25 * exp(-kt / 0.006) * clickN
+                let kickGain = (0.05 + 0.28 * f) * (0.35 + 0.65 * dr) + 0.22 * sg
+                l += kick * kickGain; r += kick * kickGain
+
+                // the rush of air: noise that brightens and swells the faster you travel
+                let nz = rand() * 2 - 1
+                windLP += (nz - windLP) * (0.02 + 0.10 * dr + 0.08 * sg)
+                windBP += (windLP - windBP) * 0.01
+                let wind = (windLP - windBP) * (0.03 + 0.20 * dr * dr + 0.25 * sg + 0.3 * windSwell)
+                l += wind * 2.2; r += wind * 2.2 * (0.85 + 0.15 * sin(twoPi * t / 3.1))
                 // a soft breath of filtered noise, swelling every nine seconds or so
                 let breath = 0.035 * (0.55 + 0.45 * sin(twoPi * t / 9.3)) * (1 - 0.4 * f)
                 lpL += (rand() * 2 - 1 - lpL) * 0.035
@@ -283,8 +355,8 @@ final class Synth {
                 if enabled < 0.5 { bl = 0; br = 0 }
                 l += bl * 2; r += br * 2
 
-                left?[i + j] = Float(tanh(l * 0.9) * 0.6)
-                right?[i + j] = Float(tanh(r * 0.9) * 0.6)
+                left?[i + j] = Float(tanh(l * 1.5) * 0.95)
+                right?[i + j] = Float(tanh(r * 1.5) * 0.95)
             }
             i += n
         }

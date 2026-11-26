@@ -49,6 +49,9 @@ struct SessionSummary {
     var cleared = 0
     var pulseStart: Int?
     var pulseEnd: Int?
+    var dives = 0
+    var bookSeconds = 0.0
+    var bookWords = 0
 }
 
 /// One message in the band under the centre target.
@@ -104,6 +107,7 @@ final class Journey: ObservableObject {
     private var startDeepest = 0
     private var cleared = 0
     private var nextChallenge = 30.0
+    private var divesSeen = 0
     /// calm ladder: each challenge cleared this dive asks for a little more calm
     private var tier = 0
     private var active: Active?
@@ -186,8 +190,24 @@ final class Journey: ObservableObject {
                 pulseEnd = h
             }
         }
-        Soundscape.shared.update(focus: engine.live.F, mellow: p.mellow, deep: VoidWorld.deep(field.Z),
-                                 reading: reading, fade: fade)
+        // the book feed test, when it's switched on
+        let book = BookFeed.shared
+        let calmNow = reading && engine.live.F > 0.55 && (p.verdict == .mellow || p.verdict == .settling)
+        switch book.tick(dt: dt, reading: reading, calm: calmNow) {
+        case .started:
+            show(Banner(title: "Book feed", detail: "\(BookText.title). Let it wash past, there's nothing to follow.", tone: .info), for: 4)
+        case .finished:
+            show(Banner(title: "Book feed complete", detail: "Three minutes of \(BookText.title). Stay as long as you like.", tone: .info), for: 4)
+        case .none:
+            break
+        }
+
+        // dives: each one that starts gets its own rush of sound
+        let live = engine.live
+        if live.dives > divesSeen { divesSeen = live.dives; Soundscape.shared.dive() }
+        Soundscape.shared.update(focus: live.F, mellow: p.mellow, deep: VoidWorld.deep(field.Z),
+                                 reading: reading, fade: fade,
+                                 drive: min(1, max(0, live.travel) / 0.5), surge: live.surge, duck: book.level)
 
         // a new world
         if p.depth > level {
@@ -271,7 +291,7 @@ final class Journey: ObservableObject {
         // start a challenge when the time comes and you're settled in
         // no new challenge in the last minute and a quarter of a timed session
         let roomLeft = plannedMinutes == 0 || total - elapsed > 75
-        if reading && roomLeft && p.verdict != .learning && sessionSeconds >= nextChallenge && clock >= bannerUntil {
+        if reading && roomLeft && !BookFeed.shared.isFeeding && p.verdict != .learning && sessionSeconds >= nextChallenge && clock >= bannerUntil {
             start(heartOK: p.heart != nil, drop: p.heartDrop)
         }
     }
@@ -329,6 +349,8 @@ final class Journey: ObservableObject {
         tier = 0
         active = nil
         nextChallenge = 30
+        divesSeen = 0
+        BookFeed.shared.sessionBegan()
         banner = nil
         lastDive = nil
         wasSteering = false
@@ -370,8 +392,11 @@ final class Journey: ObservableObject {
                                      mellowSeconds: mellowSeconds, longestMellow: longestMellow,
                                      world: sessionBest, newBest: sessionBest > startDeepest, cleared: cleared,
                                      pulseStart: sessionSeconds >= 60 ? pulseStart : nil,
-                                     pulseEnd: sessionSeconds >= 60 ? pulseEnd : nil)
+                                     pulseEnd: sessionSeconds >= 60 ? pulseEnd : nil,
+                                     dives: divesSeen,
+                                     bookSeconds: BookFeed.shared.fedSeconds, bookWords: BookFeed.shared.wordsFed)
         }
+        BookFeed.shared.sessionEnded()
         fade = 1
         Soundscape.shared.end()
     }

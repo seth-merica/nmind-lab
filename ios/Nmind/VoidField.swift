@@ -15,7 +15,7 @@ struct VoidUniforms {
 /// Turns the engine's live readings into smooth shader inputs, frame by frame.
 ///
 /// Travel: `flow` moves you down the tunnel. Its speed rises with focus and with mellow calm
-/// travel, and is capped so a ring passes any point under twice a second.
+/// travel, and is capped so rings pass any point well under three times a second.
 /// Heart: when the camera has a confident heart rate, a soft pulse follows it, one swell per
 /// beat, changing brightness by about 7 percent at most.
 /// Worlds: each depth level has its own folds, color and pattern seed. Color and pattern morph
@@ -68,7 +68,8 @@ final class VoidField {
         // travel down the tunnel
         let travel = running ? max(0, live.travel) : 0
         var want = (0.12 + 0.45 * F + 2.6 * travel) * (1 + 0.4 * heartCalm)   // a slowing heart carries you faster
-        want = min(want, 1.8)
+        // capped so rings pass well under three times a second, the photosensitive safety limit
+        want = min(want, 2.3)
         if reduce { want *= 0.35 }
         rate += (want - rate) * min(1, dt * 0.8)
         u.flow += dt * rate
@@ -119,9 +120,10 @@ final class VoidField {
         u.kseed = seedNow
         let bt = u.time - bloomAt
         let bloomEnv = bt < 0 || bt > 8 ? 0 : (bt < 0.5 ? (bt / 0.5) * (bt / 0.5) * (3 - 2 * bt / 0.5) : exp(-(bt - 0.5) / 1.2))
-        u.iters = min(4.2, 1 + 3 * F * (0.4 + 0.6 * deep) + 0.9 * rewardMix)
+        let sg = running ? live.surge : 0
+        u.iters = min(4.6, 1 + 3 * F * (0.4 + 0.6 * deep) + 0.9 * rewardMix + 0.6 * sg)
         u.wash = 1 - sat
-        u.bright = alpha * (0.3 + 0.7 * swap) * (1 + 0.35 * bloomEnv)
+        u.bright = alpha * (0.3 + 0.7 * swap) * (1 + 0.35 * bloomEnv) * (1 + 0.15 * sg)
         u.heartCalm = max(heartCalm, 0.8 * bloomEnv)
         // the far end eases to the target at the frame rate (the face reads arrive at 60 a second);
         // the tunnel's body trails it by about a quarter of a second
