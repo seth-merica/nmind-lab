@@ -75,6 +75,24 @@ final class Soundscape {
     /// Your eyes took the wheel: one soft note.
     func steer() { synth.steerCount &+= 1 }
 
+    /// Wake the audio without starting a dive (for the book feed proof on the start screen).
+    func wake() {
+        stopWork?.cancel()
+        stopWork = nil
+        audioQ.async { self.startEngine() }
+    }
+
+    /// Let the audio sleep again a little after the proof, unless a dive has started.
+    func sleepSoon() {
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, self.synth.running == 0 else { return }
+            self.engine.pause()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+        stopWork = w
+        audioQ.asyncAfter(deadline: .now() + 4, execute: w)
+    }
+
     /// The dive is over: the score fades, a singing bowl rings out, then the audio sleeps.
     func end() {
         synth.running = 0

@@ -18,7 +18,7 @@ struct BookQuiz {
         guard mode != .off else { return nil }
         let words = feed.words
         let played = feed.playedRange
-        let half = mode == .lab ? 10 : 5
+        let half = mode == .listen ? 5 : 10
         let n = phraseLength
 
         var taken: [Int] = []
@@ -33,10 +33,12 @@ struct BookQuiz {
         }
 
         // from what played: skip the first few seconds, when the voice was still fading in
-        let lo = played.lowerBound + 8, hi = played.upperBound - n
+        let lo = played.lowerBound + (mode == .whole ? 40 : 8), hi = played.upperBound - n
         guard hi - lo > n * 4 else { return nil }
+        var heardPool = Array(lo..<hi)
+        if mode == .whole { heardPool = heardPool.filter { !feed.inHeldOut($0) && !feed.inHeldOut($0 + n - 1) } }
         var heard: [Item] = []
-        for i in Array(lo..<hi).shuffled() where heard.count < half && spaced(i) {
+        for i in heardPool.shuffled() where heard.count < half && spaced(i) {
             if let p = phrase(at: i) { heard.append(Item(phrase: p, heard: true)); taken.append(i) }
         }
         guard heard.count >= 2 else { return nil }
@@ -51,9 +53,14 @@ struct BookQuiz {
         }
         var pools: [[Int]] = []
         let all = Array(0..<(words.count - n))
-        if mode == .listen { pools.append(all.filter { $0 >= near.upperBound }) }
-        pools.append(all.filter(clear))
-        pools.append(all.filter { !near.overlaps($0..<($0 + n)) })
+        if mode == .whole {
+            // the 14x run plays nearly the whole book, so decoys come only from the passages held back
+            pools.append(feed.heldOutIndices.filter { feed.inHeldOut($0 + n - 1) })
+        } else {
+            if mode == .listen { pools.append(all.filter { $0 >= near.upperBound }) }
+            pools.append(all.filter(clear))
+            pools.append(all.filter { !near.overlaps($0..<($0 + n)) })
+        }
         var decoys: [Item] = []
         for pool in pools where decoys.count < heard.count {
             for i in pool.shuffled() where decoys.count < heard.count && spaced(i) {
@@ -128,7 +135,7 @@ struct QuizCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(isLab ? "LAB QUIZ" : "RECALL CHECK")
+            Text(quiz.mode == .whole ? "14X QUIZ" : isLab ? "LAB QUIZ" : "RECALL CHECK")
                 .font(.caption.weight(.semibold)).tracking(1.4).foregroundStyle(Palette.teal)
             if finished { result } else { question }
         }

@@ -4,7 +4,7 @@ import SwiftUI
 /// Shown on screen so you can tell which build is on the phone. Kept here, not in the Xcode
 /// project file, so updates never touch the file that holds your signing settings.
 enum AppInfo {
-    static let version = "0.21"
+    static let version = "0.22"
 }
 
 enum Palette {
@@ -67,12 +67,18 @@ final class DrawState {
         let now = Date().timeIntervalSinceReferenceDate
         if engine.running && !engine.calibrating && book.state == .feeding {
             let target = book.wordIndex
-            if target < wordAt || target - wordAt > 20 { wordAt = target }
+            if target < wordAt || target - wordAt > 160 { wordAt = target }
             while wordAt < target && wordAt < book.words.count {
                 let w = book.words[wordAt].trimmingCharacters(in: .punctuationCharacters)
                 wordAt += 1
-                if w.isEmpty { continue }
-                if book.sessionMode == .listen {
+                if w.isEmpty || (book.sessionMode == .whole && book.inHeldOut(wordAt - 1)) { continue }
+                if book.sessionMode == .whole {
+                    // 14x: dozens a second, turned, mirrored and gone in half a second, never readable
+                    if flying.count < 140 {
+                        flying.append(Flying(word: w, angle: Double.random(in: 0..<(2 * .pi)), born: now,
+                                             life: Double.random(in: 0.35...0.55), mirror: Bool.random(), spin: Double.random(in: -1.2...1.2)))
+                    }
+                } else if book.sessionMode == .listen {
                     // Deep Listen: upright and readable, each word on the next turn of a slow spiral
                     spiral += 2.39996
                     flying.append(Flying(word: w, angle: spiral, born: now, life: 1.5, mirror: false, spin: 0, readable: true))
@@ -286,6 +292,11 @@ struct BookFeedPicker: View {
                 Text("The fast, low feed with unreadable words, for 3 minutes once you settle, from a new place in the book each time. After the session, a 20 phrase quiz (half played, half never played) checks whether anything stuck. Guessing scores about 10.")
                     .font(.caption).foregroundStyle(Palette.mist)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if book.mode == .whole {
+                Text("The whole book at 14 times normal speaking speed, every word spoken by the voice, with the music, and its words streaming through the tunnel too fast to read. Four short passages are held back so the 20 phrase quiz after the session has text you never heard. The end card shows the words played and the real speed.")
+                    .font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+                ProofPanel(book: book)
             }
         }
     }
@@ -299,6 +310,35 @@ struct BookFeedPicker: View {
                 .frame(maxWidth: .infinity).padding(.vertical, 8)
                 .background(Capsule().fill(on ? Palette.teal : Palette.current.opacity(0.45)))
         }
+    }
+}
+
+/// Hear for yourself that the 14x feed is the real voice: one sentence at full speed, then the same
+/// recording uncompressed, then the same sentence at normal speed, with the measured numbers.
+struct ProofPanel: View {
+    @ObservedObject var book: BookFeed
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let stage = book.proofStage {
+                Text(stage).font(.footnote.weight(.semibold)).foregroundStyle(Palette.teal)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(book.proofText).font(.footnote).foregroundStyle(Palette.foam)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Button(action: { book.runProof() }) {
+                    Text("Hear the proof")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Palette.foam)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .overlay(Capsule().stroke(Palette.teal, lineWidth: 1))
+                }
+            }
+            if !book.proofNumbers.isEmpty {
+                Text(book.proofNumbers).font(.caption).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 2)
     }
 }
 
@@ -519,6 +559,10 @@ struct SummaryCard: View {
             if summary.bookSeconds > 5 {
                 Text("\(summary.bookMode): \(Journey.mmss(summary.bookSeconds)) of \(BookText.title), about \(summary.bookWords) words")
                     .font(.footnote).foregroundStyle(Palette.mist)
+            }
+            if let d = summary.bookDetail {
+                Text(d).font(.footnote).foregroundStyle(Palette.mist)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let q = summary.quizLine {
                 Text(q).font(.footnote).foregroundStyle(Palette.mist)

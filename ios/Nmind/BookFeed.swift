@@ -25,12 +25,13 @@ final class BookFeed: ObservableObject {
     private static let listenPosKey = "nmind.bookfeed.listenpos.v1", labHeardKey = "nmind.bookfeed.labheard.v1"
 
     enum Mode: String, CaseIterable {
-        case off, listen, lab
+        case off, listen, lab, whole
         var label: String {
             switch self {
             case .off: return "Off"
             case .listen: return "Deep Listen"
             case .lab: return "Lab test"
+            case .whole: return "Book 14x"
             }
         }
     }
@@ -53,7 +54,40 @@ final class BookFeed: ObservableObject {
     /// the first word this session read
     private(set) var startWord = 0
     var isFeeding: Bool { state == .feeding || state == .paused }
-    var speed: Double { (sessionMode == .off ? mode : sessionMode) == .listen ? listenSpeed : labSpeed }
+    var speed: Double {
+        switch sessionMode == .off ? mode : sessionMode {
+        case .listen: return listenSpeed
+        case .whole: return BookFeed.wholeSpeed
+        default: return labSpeed
+        }
+    }
+
+    // MARK: whole book at 14x
+    //
+    // 14 times this voice's normal speaking speed, reached in two real steps. First the speech engine
+    // reads every word at its own top rate (each word fully spoken by the voice). Then a time compressor
+    // speeds that recording up the rest of the way without raising the pitch. The compression rate is
+    // set from what the voice actually produced, so the words played per minute land on 14x.
+    static let wholeSpeed = 14.0
+    private static let normalKey = "nmind.bookfeed.normalwps.v1", compressKey = "nmind.bookfeed.compress.v1"
+    /// words a second this voice reads at its normal rate (measured by the proof, about 3 until then)
+    private(set) var normalWPS: Double = { let v = UserDefaults.standard.double(forKey: "nmind.bookfeed.normalwps.v1"); return v > 0.5 ? v : 3.0 }()
+    /// how many times faster the engine's top rate is than its normal rate, as measured
+    private(set) var engineFactor = 0.0
+    /// the time compression on top of that
+    private(set) var compress: Double = { let v = UserDefaults.standard.double(forKey: "nmind.bookfeed.compress.v1"); return v >= 1 ? v : 5.0 }()
+    /// chunks kept out of the 14x run so the quiz has text that never played
+    private(set) var heldOut: Set<Int> = []
+    var heldOutWords: Int { heldOut.reduce(0) { $0 + chunks[$1].count } }
+    private func heldBefore(_ w: Int) -> Int {
+        heldOut.reduce(0) { sum, k in
+            let c = chunks[k]
+            return sum + max(0, min(w, c.first + c.count) - c.first)
+        }
+    }
+    /// word positions in the held back chunks, for quiz decoys
+    var heldOutIndices: [Int] { heldOut.sorted().flatMap { k in Array(chunks[k].first..<(chunks[k].first + chunks[k].count)) } }
+    func inHeldOut(_ w: Int) -> Bool { heldOut.contains { chunks[$0].first <= w && w < chunks[$0].first + chunks[$0].count } }
     var wordIndex: Int { min(words.count, Int(cursor)) }
 
     let words: [String]
@@ -107,7 +141,13 @@ final class BookFeed: ObservableObject {
         fedSeconds = 0; level = 0; calmHeld = 0
         // Deep Listen carries on where you left off; the lab feed starts somewhere new each time
         var k = 0
-        if mode == .listen {
+        heldOut = []
+        if mode == .whole {
+            // four passages spread through the book are held back for the quiz
+            let n = chunks.count
+            heldOut = Set([0.2, 0.4, 0.6, 0.8].map { min(n - 2, max(1, Int((Double(n) * $0).rounded()))) })
+            k = 0
+        } else if mode == .listen {
             let pos = UserDefaults.standard.integer(forKey: BookFeed.listenPosKey)
             k = chunks.lastIndex { $0.first <= pos } ?? 0
             if chunks[k].first > words.count - 60 { k = 0 }
@@ -136,7 +176,20 @@ final class BookFeed: ObservableObject {
     }
 
     /// Words fed so far this session.
-    var wordsFed: Int { max(0, wordIndex - startWord) }
+    var wordsFed: Int { max(0, wordIndex - startWord - (sessionMode == .whole ? heldBefore(wordIndex) : 0)) }
+    /// A plain account of the 14x run, for the end card.
+    var wholeReport: String? {
+        guard sessionMode == .whole, fedSeconds > 5 else { return nil }
+        let wpm = Double(wordsFed) / fedSeconds * 60
+        let x = wpm / (normalWPS * 60)
+        var line = "\(wordsFed) words played in \(Journey.mmss(fedSeconds)), \(Int(wpm.rounded())) a minute (\(String(format: "%.1f", x))x this voice's normal speed)."
+        if engineFactor > 0 {
+            line += " Voice at its top rate \(String(format: "%.1f", engineFactor))x, compressed \(String(format: "%.1f", compress))x more."
+        }
+        if wordIndex < words.count - 1 { line += " The book was \(Int((Double(wordIndex) / Double(words.count) * 100).rounded()))% through." }
+        line += " \(heldOutWords) words were held back for the quiz."
+        return line
+    }
     /// The words that actually played this session.
     var playedRange: Range<Int> { startWord..<max(startWord, wordIndex) }
     /// Parts of the book earlier lab tests played, so quiz decoys come from text you have never heard.
@@ -159,7 +212,8 @@ final class BookFeed: ObservableObject {
             fedSeconds += dt
             if let at = playedPosition() { cursor = max(cursor, at) } else { cursor += dt * wordsPerSecond }
             pump()
-            if fedSeconds >= BookFeed.testSeconds || cursor >= Double(words.count) - 1 {
+            let limit = sessionMode == .whole ? BookFeed.testSeconds * 2 : BookFeed.testSeconds
+            if fedSeconds >= limit || cursor >= Double(words.count) - 1 {
                 finishAudio(); state = .done; ev = .finished
             }
         case .paused:
@@ -171,7 +225,7 @@ final class BookFeed: ObservableObject {
     }
 
     /// The system voice reads about 180 words a minute at its normal rate; only a fallback now.
-    private var wordsPerSecond: Double { 3.0 * speed }
+    private var wordsPerSecond: Double { normalWPS * speed }
 
     /// Where the voice has reached, in words, from what the player has played.
     private func playedPosition() -> Double? {
@@ -198,7 +252,7 @@ final class BookFeed: ObservableObject {
 
     private func startAudio() {
         let listen = sessionMode == .listen
-        let rate = Float(speed)
+        let rate = Float(sessionMode == .whole ? compress : speed)
         sound.audioQ.async {
             self.gen += 1; self.queued = 0; self.writing = false
             self.lock.lock(); self.timeline = []; self.schedEnd = 0; self.lock.unlock()
@@ -256,7 +310,7 @@ final class BookFeed: ObservableObject {
     /// Keeps about eight seconds of speech queued ahead of the player.
     private func pump() {
         sound.audioQ.async {
-            guard !self.writing, self.queued < 8 else { return }
+            guard !self.writing, self.queued < (self.sessionMode == .whole ? 12 : 8) else { return }
             self.writing = true
             let g = self.gen
             DispatchQueue.main.async { self.writeNext(gen: g) }
@@ -264,6 +318,7 @@ final class BookFeed: ObservableObject {
     }
 
     private func writeNext(gen g: Int) {
+        while heldOut.contains(nextChunk) { nextChunk += 1 }
         guard isFeeding, nextChunk < chunks.count else {
             sound.audioQ.async { self.writing = false }
             return
@@ -273,11 +328,12 @@ final class BookFeed: ObservableObject {
         let u = AVSpeechUtterance(string: chunk.text)
         nextChunk += 1
         u.voice = AVSpeechSynthesisVoice(language: "en-US")
-        u.rate = AVSpeechUtteranceDefaultSpeechRate
-        u.pitchMultiplier = sessionMode == .listen ? 1.0 : 0.8   // the lab voice is low and even
+        let whole = sessionMode == .whole
+        u.rate = whole ? AVSpeechUtteranceMaximumSpeechRate : AVSpeechUtteranceDefaultSpeechRate
+        u.pitchMultiplier = sessionMode == .listen ? 1.0 : 0.8   // the fast voices are low and even
         u.volume = 1
         u.preUtteranceDelay = 0; u.postUtteranceDelay = 0
-        let speed = self.speed
+        let speed = whole ? compress : self.speed
         synth.write(u) { [weak self] buffer in
             guard let self else { return }
             guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else {
@@ -286,7 +342,9 @@ final class BookFeed: ObservableObject {
                     self.writing = false
                     self.lock.lock()
                     if let i = self.timeline.lastIndex(where: { $0.chunk == k }) { self.timeline[i].done = true }
+                    let finished = self.timeline.filter { $0.done }
                     self.lock.unlock()
+                    if whole { self.retune(finished) }
                 }
                 return
             }
@@ -311,6 +369,106 @@ final class BookFeed: ObservableObject {
                     self.sound.audioQ.async { if self.gen == g { self.queued = max(0, self.queued - seconds) } }
                 }
             }
+        }
+    }
+
+    /// Runs on the audio queue: from what the voice has really produced at its top rate, set the
+    /// compression so the words played land on 14 times its normal speed.
+    private func retune(_ done: [Seg]) {
+        let words = done.reduce(0) { $0 + $1.count }, secs = done.reduce(0.0) { $0 + $1.dur }
+        guard words >= 40, secs > 1 else { return }
+        let topWPS = Double(words) / secs
+        let c = min(32, max(1, BookFeed.wholeSpeed * normalWPS / topWPS))
+        sound.bookPitch.rate = Float(c)
+        DispatchQueue.main.async {
+            self.engineFactor = topWPS / self.normalWPS
+            self.compress = c
+            UserDefaults.standard.set(c, forKey: BookFeed.compressKey)
+        }
+    }
+
+    // MARK: the proof
+
+    /// The proof, on the start screen: one sentence of the book at full 14x, then the same recording
+    /// with no compression (the voice's own top speed), then the same sentence at normal speed.
+    @Published private(set) var proofStage: String?
+    @Published private(set) var proofText = ""
+    @Published private(set) var proofNumbers = ""
+    private let proofSynth = AVSpeechSynthesizer()
+
+    func runProof() {
+        guard proofStage == nil, !isFeeding else { return }
+        let sentences = BookText.body.replacingOccurrences(of: "\n", with: " ")
+            .components(separatedBy: ". ").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { (16...32).contains($0.split(separator: " ").count) && !$0.contains("\"") }
+        guard let line = sentences.randomElement() else { return }
+        let text = line + "."
+        proofText = text
+        proofNumbers = ""
+        proofStage = "Preparing the voice"
+        Soundscape.shared.wake()
+        record(text, fast: true) { fast in
+            self.record(text, fast: false) { normal in
+                self.playProof(text: text, fast: fast, normal: normal)
+            }
+        }
+    }
+
+    private func record(_ text: String, fast: Bool, done: @escaping ([AVAudioPCMBuffer]) -> Void) {
+        let u = AVSpeechUtterance(string: text)
+        u.voice = AVSpeechSynthesisVoice(language: "en-US")
+        u.rate = fast ? AVSpeechUtteranceMaximumSpeechRate : AVSpeechUtteranceDefaultSpeechRate
+        u.pitchMultiplier = fast ? 0.8 : 1.0
+        u.preUtteranceDelay = 0; u.postUtteranceDelay = 0
+        var out: [AVAudioPCMBuffer] = []
+        proofSynth.write(u) { [weak self] buffer in
+            guard let self else { return }
+            if let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 {
+                if let b = self.convert(pcm) { out.append(b) }
+            } else {
+                DispatchQueue.main.async { done(out) }
+            }
+        }
+    }
+
+    private func playProof(text: String, fast: [AVAudioPCMBuffer], normal: [AVAudioPCMBuffer]) {
+        let sr = Soundscape.bookFormat.sampleRate
+        let n = Double(text.split(separator: " ").count)
+        let fastSecs = fast.reduce(0.0) { $0 + Double($1.frameLength) } / sr
+        let normSecs = normal.reduce(0.0) { $0 + Double($1.frameLength) } / sr
+        guard fastSecs > 0.2, normSecs > 0.2 else { proofStage = nil; return }
+        // measured on this phone, with this voice
+        normalWPS = n / normSecs
+        UserDefaults.standard.set(normalWPS, forKey: BookFeed.normalKey)
+        engineFactor = normSecs / fastSecs
+        compress = min(32, max(1, BookFeed.wholeSpeed / engineFactor))
+        UserDefaults.standard.set(compress, forKey: BookFeed.compressKey)
+        let c = compress
+        let total = engineFactor * c
+        proofNumbers = "\(Int(n)) words. Normal speed \(Int((normalWPS * 60).rounded())) words a minute. Voice at its top rate \(String(format: "%.1f", engineFactor))x, then compressed \(String(format: "%.1f", c))x, for \(String(format: "%.1f", total))x in all (\(Int((normalWPS * 60 * total).rounded())) a minute)."
+        let s1 = fastSecs / c, s2 = fastSecs, gap = 1.4
+        let snd = Soundscape.shared
+        func play(_ bufs: [AVAudioPCMBuffer], rate: Float, after: Double, stage: String) {
+            snd.audioQ.asyncAfter(deadline: .now() + after) {
+                DispatchQueue.main.async { self.proofStage = stage }
+                let p = snd.bookPlayer
+                p.stop()
+                snd.bookPitch.rate = rate
+                snd.bookPitch.pitch = 0
+                snd.bookEQ.bands[0].bypass = true
+                for b in bufs { p.scheduleBuffer(b, completionHandler: nil) }
+                p.volume = 1
+                if snd.engine.isRunning { p.play() }
+            }
+        }
+        play(fast, rate: Float(c), after: 0.8, stage: "1 of 3: the full \(String(format: "%.1f", total))x feed (\(String(format: "%.1f", s1)) s)")
+        play(fast, rate: 1, after: 0.8 + s1 + gap, stage: "2 of 3: the same recording, not compressed: the voice at its own top rate")
+        play(normal, rate: 1, after: 0.8 + s1 + gap + s2 + gap, stage: "3 of 3: the same sentence at normal speed")
+        snd.audioQ.asyncAfter(deadline: .now() + 0.8 + s1 + gap + s2 + gap + normSecs + 0.8) {
+            snd.bookPlayer.stop()
+            snd.bookPlayer.volume = 0
+            DispatchQueue.main.async { self.proofStage = nil }
+            snd.sleepSoon()
         }
     }
 
